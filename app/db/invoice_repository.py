@@ -1,0 +1,161 @@
+"""Invoice database repository for local PostgreSQL."""
+
+import json
+import os
+from datetime import datetime
+from app.db.postgres_client import db
+
+
+def get_last_invoice_id():
+    """Get the last invoice ID from database."""
+    try:
+        query = "SELECT invoice_id FROM invoices ORDER BY invoice_id DESC LIMIT 1"
+        result = db.execute_query(query, fetch_one=True)
+        if result:
+            return result['invoice_id']
+        return 0
+    except Exception as e:
+        print(f"⚠️ Database error: {e}")
+        return 0
+
+
+def get_next_image_name():
+    """Generate next sequential image name based on last invoice ID."""
+    last_id = get_last_invoice_id()
+    next_id = last_id + 1
+    return f"inv_{next_id}.jpg"
+
+
+def insert_invoice(company_name, phone_number, strn, ntn, order_number, 
+                   invoice_number, invoice_date, clean_json, raw_ocr_json, image_path):
+    """Insert a new invoice into database."""
+    try:
+        # Store just the filename in database (relative path)
+        image_filename = os.path.basename(image_path)
+        
+        query = """
+            INSERT INTO invoices (
+                company_name, 
+                phone_number, 
+                strn, 
+                ntn, 
+                order_number, 
+                invoice_number, 
+                invoice_date, 
+                clean_json, 
+                raw_ocr_json, 
+                invoice_image_path, 
+                created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING invoice_id
+        """
+        
+        params = (
+            company_name if company_name else None,
+            phone_number if phone_number else None,
+            strn if strn else None,
+            ntn if ntn else None,
+            order_number if order_number else None,
+            invoice_number if invoice_number else None,
+            invoice_date if invoice_date else None,
+            json.dumps(clean_json) if clean_json else None,
+            json.dumps(raw_ocr_json) if raw_ocr_json else None,
+            image_filename,
+            datetime.now()
+        )
+        
+        result = db.execute_query(query, params, fetch_one=True)
+        
+        if result:
+            return {
+                'success': True,
+                'id': result['invoice_id'],
+                'image_path': image_filename
+            }
+        return {'success': False, 'error': 'No data returned'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def get_all_invoices(limit=100, offset=0):
+    """Get all invoices from database."""
+    try:
+        query = "SELECT * FROM invoices ORDER BY invoice_id DESC LIMIT %s OFFSET %s"
+        result = db.execute_query(query, (limit, offset), fetch_all=True)
+        return {'success': True, 'invoices': result}
+    except Exception as e:
+        return {'success': False, 'error': str(e), 'invoices': []}
+
+
+def get_invoice_by_id(invoice_id):
+    """Get invoice by ID."""
+    try:
+        query = "SELECT * FROM invoices WHERE invoice_id = %s"
+        result = db.execute_query(query, (invoice_id,), fetch_one=True)
+        if result:
+            return {'success': True, 'invoice': result}
+        return {'success': False, 'error': 'Invoice not found'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def count_invoices():
+    """Count total invoices."""
+    try:
+        query = "SELECT COUNT(*) as count FROM invoices"
+        result = db.execute_query(query, fetch_one=True)
+        return {'success': True, 'count': result['count'] if result else 0}
+    except Exception as e:
+        return {'success': False, 'error': str(e), 'count': 0}
+
+
+def search_invoices(search_query):
+    """Search invoices by various fields."""
+    try:
+        query = """
+            SELECT * FROM invoices 
+            WHERE company_name ILIKE %s 
+               OR ntn ILIKE %s 
+               OR invoice_number ILIKE %s
+               OR phone_number ILIKE %s
+               OR strn ILIKE %s
+            ORDER BY invoice_id DESC
+            LIMIT 100
+        """
+        search_pattern = f"%{search_query}%"
+        params = (search_pattern, search_pattern, search_pattern, search_pattern, search_pattern)
+        result = db.execute_query(query, params, fetch_all=True)
+        return {'success': True, 'results': result}
+    except Exception as e:
+        return {'success': False, 'error': str(e), 'results': []}
+
+
+def delete_invoice(invoice_id):
+    """Delete an invoice by ID."""
+    try:
+        query = "DELETE FROM invoices WHERE invoice_id = %s RETURNING invoice_id"
+        result = db.execute_query(query, (invoice_id,), fetch_one=True)
+        if result:
+            return {'success': True, 'deleted_id': result['invoice_id']}
+        return {'success': False, 'error': 'Invoice not found'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def update_invoice_image_path(invoice_id, image_path):
+    """Update the image path for an invoice."""
+    try:
+        image_filename = os.path.basename(image_path)
+        query = """
+            UPDATE invoices 
+            SET invoice_image_path = %s 
+            WHERE invoice_id = %s 
+            RETURNING invoice_id
+        """
+        params = (image_filename, invoice_id)
+        result = db.execute_query(query, params, fetch_one=True)
+        if result:
+            return {'success': True, 'updated_id': result['invoice_id']}
+        return {'success': False, 'error': 'Invoice not found'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
