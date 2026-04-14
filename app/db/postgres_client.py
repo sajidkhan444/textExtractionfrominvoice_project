@@ -18,7 +18,7 @@ class PostgresClient:
                 1, 20,
                 host=os.getenv("DB_HOST", "localhost"),
                 port=os.getenv("DB_PORT", "5432"),
-                database=os.getenv("DB_NAME", "expenses_flow"),
+                database=os.getenv("DB_NAME", "expense_flow"),
                 user=os.getenv("DB_USER", "postgres"),
                 password=os.getenv("DB_PASSWORD", "")
             )
