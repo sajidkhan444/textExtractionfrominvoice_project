@@ -28,19 +28,41 @@ class PostgresClient:
             print(f"❌ PostgreSQL Connection Failed: {e}")
             return False
     
-    def execute_query(self, query, params=None, fetch_one=False, fetch_all=False):
-        conn = self.pool.getconn()
-        try:
-            with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                cur.execute(query, params)
-                if fetch_one:
-                    return cur.fetchone()
-                elif fetch_all:
-                    return cur.fetchall()
-                else:
-                    conn.commit()
-                    return None
-        finally:
-            self.pool.putconn(conn)
-
-db = PostgresClient()
+def execute_query(self, query, params=None, fetch_one=False, fetch_all=False):
+    conn = self.pool.getconn()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            print(f"🔍 [DEBUG] Executing SQL: {query[:200]}...")
+            if params:
+                # Truncate long params for display
+                params_display = []
+                for p in params:
+                    if isinstance(p, str) and len(p) > 100:
+                        params_display.append(f"{p[:100]}...")
+                    else:
+                        params_display.append(p)
+                print(f"🔍 [DEBUG] Params: {params_display}")
+            
+            cur.execute(query, params)
+            
+            if fetch_one:
+                result = cur.fetchone()
+                print(f"🔍 [DEBUG] fetch_one result: {result}")
+                return result
+            elif fetch_all:
+                result = cur.fetchall()
+                print(f"🔍 [DEBUG] fetch_all returned {len(result) if result else 0} rows")
+                return result
+            else:
+                conn.commit()
+                print(f"🔍 [DEBUG] Query committed successfully (no return data)")
+                return None
+    except Exception as e:
+        print(f"❌ [DEBUG] Database error: {e}")
+        print(f"❌ [DEBUG] Failed query: {query}")
+        if params:
+            print(f"❌ [DEBUG] Failed params: {params}")
+        conn.rollback()  # Rollback on error
+        raise e
+    finally:
+        self.pool.putconn(conn)

@@ -28,11 +28,17 @@ def get_next_image_name():
 
 def insert_invoice(company_name, phone_number, strn, ntn, order_number, 
                    invoice_number, invoice_date, clean_json, raw_ocr_json, image_path):
-    """Insert a new invoice into database."""
+    """Insert a new invoice - only AI-relevant columns."""
     try:
+        print(f"\n🔍 [DEBUG] insert_invoice called with:")
+        print(f"   company_name: {company_name}")
+        print(f"   invoice_number: {invoice_number}")
+        print(f"   image_path: {image_path}")
+        
         # Store just the filename in database (relative path)
         image_filename = os.path.basename(image_path)
         
+        # Insert ONLY the columns we care about
         query = """
             INSERT INTO invoices (
                 company_name, 
@@ -44,7 +50,7 @@ def insert_invoice(company_name, phone_number, strn, ntn, order_number,
                 invoice_date, 
                 clean_json, 
                 raw_ocr_json, 
-                invoice_image_path, 
+                invoice_image_path,
                 created_at
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING invoice_id
@@ -64,9 +70,14 @@ def insert_invoice(company_name, phone_number, strn, ntn, order_number,
             datetime.now()
         )
         
+        print(f"🔍 [DEBUG] Executing query with params length: {len(params)}")
+        
         result = db.execute_query(query, params, fetch_one=True)
         
+        print(f"🔍 [DEBUG] Query result: {result}")
+        
         if result:
+            print(f"   ✅ Database insert successful! ID: {result['invoice_id']}")
             return {
                 'success': True,
                 'id': result['invoice_id'],
@@ -74,7 +85,11 @@ def insert_invoice(company_name, phone_number, strn, ntn, order_number,
             }
         return {'success': False, 'error': 'No data returned'}
     except Exception as e:
+        print(f"   ❌ Database insert error: {e}")
+        import traceback
+        traceback.print_exc()  # This will print full error stack
         return {'success': False, 'error': str(e)}
+    
 
 
 def get_all_invoices(limit=100, offset=0):
