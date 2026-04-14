@@ -30,16 +30,17 @@ def insert_invoice(company_name, phone_number, strn, ntn, order_number,
                    invoice_number, invoice_date, clean_json, raw_ocr_json, image_path):
     """Insert a new invoice - only AI-relevant columns."""
     try:
+        print(f"\n🔍 [DEBUG] insert_invoice called with:")
+        print(f"   company_name: {company_name}")
+        print(f"   invoice_number: {invoice_number}")
+        print(f"   image_path: {image_path}")
+        
         # Store just the filename in database (relative path)
         image_filename = os.path.basename(image_path)
         
-        # Generate a value for invoicename (required column)
-        invoice_name_value = f"INV_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        
-        # Insert ALL required columns
+        # Insert ONLY the columns we care about (invoicename will use DEFAULT)
         query = """
             INSERT INTO invoices (
-                invoicename,
                 company_name, 
                 phone_number, 
                 strn, 
@@ -51,12 +52,11 @@ def insert_invoice(company_name, phone_number, strn, ntn, order_number,
                 raw_ocr_json, 
                 invoice_image_path,
                 created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING invoice_id
         """
         
         params = (
-            invoice_name_value,  # invoicename (required)
             company_name if company_name else None,
             phone_number if phone_number else None,
             strn if strn else None,
@@ -70,9 +70,11 @@ def insert_invoice(company_name, phone_number, strn, ntn, order_number,
             datetime.now()
         )
         
-        print(f"🔍 [DEBUG] Inserting with invoicename: {invoice_name_value}")
+        print(f"🔍 [DEBUG] Executing query with params length: {len(params)}")
         
         result = db.execute_query(query, params, fetch_one=True)
+        
+        print(f"🔍 [DEBUG] Query result: {result}")
         
         if result:
             print(f"   ✅ Database insert successful! ID: {result['invoice_id']}")
@@ -87,6 +89,7 @@ def insert_invoice(company_name, phone_number, strn, ntn, order_number,
         import traceback
         traceback.print_exc()
         return {'success': False, 'error': str(e)}
+    
 
 
 def get_all_invoices(limit=100, offset=0):
