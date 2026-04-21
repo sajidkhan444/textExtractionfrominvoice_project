@@ -26,14 +26,14 @@ def pdf_to_images_continue(pdf_path, start_from=1, output_folder=None):
         pix = page.get_pixmap(matrix=mat, alpha=False)
         
         image_number = start_from + page_num
-        image_filename = f"inv_{image_number}.jpg"
+        image_filename = f"temp_page_{image_number}.jpg"
         image_path = os.path.join(output_folder, image_filename)
         
         pix.save(image_path)
         image_paths.append(image_path)
-        print(f"   ✅ Created: {image_filename}")
+        # REMOVED: print(f"   ✅ Created: {image_filename}")
     
     doc.close()
-    print(f"\n📸 Converted {len(image_paths)} pages: inv_{start_from}.jpg to inv_{start_from + len(image_paths) - 1}.jpg")
+    # REMOVED: print(f"\n📸 Converted {len(image_paths)} pages...")
     
     return image_paths

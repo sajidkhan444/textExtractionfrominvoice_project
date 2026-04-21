@@ -5,7 +5,6 @@ import os
 import traceback
 from app.db.invoice_repository import insert_invoice, get_next_image_name
 from app.db.storage_repository import upload_image_to_storage
-from app.config import LOCAL_STORAGE_PATH
 
 
 def process_single_invoice(image_path, image_name, extractor, qwen_parser):
@@ -95,3 +94,122 @@ def process_single_invoice(image_path, image_name, extractor, qwen_parser):
         'image_name': image_name,
         'clean_data': clean_data
     }
+
+
+def process_external_invoice(image_path, image_name, extractor, qwen_parser, invoice_id, invoicename):
+    """Process invoice from other department and update existing row."""
+    from app.db.invoice_repository import update_external_invoice, update_invoice_status
+    from app.utils.helpers import generate_filename_from_company, get_unique_filename
+    from app.db.storage_repository import upload_image_to_storage
+    from datetime import datetime
+    
+    print(f"\n{'='*50}")
+    print(f"📸 Processing External Invoice: {image_name}")
+    print(f"   Updating invoice_id: {invoice_id}")
+    print(f"   Original invoicename: {invoicename}")
+    print(f"{'='*50}")
+    
+    try:
+        # Extract with EasyOCR
+        print("🔍 Starting OCR extraction...")
+        extracted_data = extractor.process_invoice(image_path)
+        if not extracted_data:
+            print("❌ OCR extraction failed")
+            update_invoice_status(invoice_id, 'rejected')
+            return {'success': False, 'error': 'OCR extraction failed'}
+        
+        # Parse with Qwen
+        print("🤖 Starting Qwen parsing...")
+        clean_data = qwen_parser.process(extracted_data)
+        if not clean_data:
+            print("❌ Qwen parsing failed")
+            update_invoice_status(invoice_id, 'rejected')
+            return {'success': False, 'error': 'Qwen parsing failed'}
+        
+        # Get company name and generate dynamic filename
+        company_name = clean_data.get('company_name')
+        new_image_name = generate_filename_from_company(company_name, invoicename, invoice_id)
+        
+        # Display extracted fields
+        print(f"\n📊 EXTRACTED FIELDS:")
+        print(f"   Company: {company_name or 'N/A'}")
+        print(f"   Phone: {clean_data.get('phone_number', 'N/A')}")
+        print(f"   STRN: {clean_data.get('strn', 'N/A')}")
+        print(f"   NTN: {clean_data.get('ntn', 'N/A')}")
+        print(f"   Invoice No: {clean_data.get('invoice_number', 'N/A')}")
+        print(f"   Date: {clean_data.get('date', 'N/A')}")
+        print(f"   📸 Generated filename: {new_image_name}")
+        
+        # Update the existing invoice with extraction results
+        update_result = update_external_invoice(
+            invoice_id=invoice_id,
+            company_name=company_name,
+            phone_number=clean_data.get('phone_number'),
+            strn=clean_data.get('strn'),
+            ntn=clean_data.get('ntn'),
+            order_number=clean_data.get('order_number'),
+            invoice_number=clean_data.get('invoice_number'),
+            invoice_date=clean_data.get('date'),
+            clean_json=clean_data,
+            raw_ocr_json=extracted_data,
+            invoice_image_path=new_image_name
+        )
+        
+        # Handle duplicate filename error
+        if not update_result['success']:
+            # If duplicate filename, try one more time with a forced unique name
+            if 'duplicate' in update_result['error'].lower():
+                print(f"   ⚠️ Duplicate detected, generating forced unique name...")
+                # Force a unique name with timestamp and .jpg extension
+                name_without_ext = new_image_name.rsplit('.', 1)[0]
+                forced_name = f"{name_without_ext}_{datetime.now().strftime('%Y%m%d%H%M%S')}.jpg"
+                print(f"   📸 Retrying with: {forced_name}")
+                
+                # Retry the update with forced unique name
+                update_result = update_external_invoice(
+                    invoice_id=invoice_id,
+                    company_name=company_name,
+                    phone_number=clean_data.get('phone_number'),
+                    strn=clean_data.get('strn'),
+                    ntn=clean_data.get('ntn'),
+                    order_number=clean_data.get('order_number'),
+                    invoice_number=clean_data.get('invoice_number'),
+                    invoice_date=clean_data.get('date'),
+                    clean_json=clean_data,
+                    raw_ocr_json=extracted_data,
+                    invoice_image_path=forced_name
+                )
+                
+                if update_result['success']:
+                    new_image_name = forced_name
+                    print(f"   ✅ Retry successful with: {forced_name}")
+            
+            if not update_result['success']:
+                update_invoice_status(invoice_id, 'rejected')
+                return {'success': False, 'error': f'Database update rejected: {update_result["error"]}'}
+        
+        # Update status to approved
+        update_invoice_status(invoice_id, 'approved')
+        
+        # Copy to local storage with new dynamic name
+        upload_result = upload_image_to_storage(image_path, new_image_name)
+        
+        if not upload_result['success']:
+            print(f"   ⚠️ Storage warning: {upload_result['error']}")
+        else:
+            print(f"   ✅ Image saved to: {upload_result['local_path']}")
+        
+        print(f"\n✅ SUCCESS! External invoice {invoice_id} approved!")
+        print(f"   📸 Final filename: {new_image_name}")
+        
+        return {
+            'success': True,
+            'invoice_id': invoice_id,
+            'image_name': new_image_name,
+            'clean_data': clean_data
+        }
+        
+    except Exception as e:
+        print(f"❌ Exception in process_external_invoice: {e}")
+        update_invoice_status(invoice_id, 'rejected')
+        return {'success': False, 'error': str(e)}

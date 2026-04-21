@@ -21,14 +21,13 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 # STORAGE CONFIGURATION
 # =====================================================
 
-# Local Storage Path for invoice images (permanent storage)
-LOCAL_STORAGE_PATH = os.getenv("LOCAL_STORAGE_PATH", "./data/invoices")
+# Processed Invoices Path (inside project)
+PROCESSED_INVOICES_PATH = os.getenv("PROCESSED_INVOICES_PATH", "./data/processed_invoices")
 
 # Ensure the storage path exists
-if LOCAL_STORAGE_PATH:
-    LOCAL_STORAGE_PATH = os.path.abspath(LOCAL_STORAGE_PATH)
-    os.makedirs(LOCAL_STORAGE_PATH, exist_ok=True)
-
+if PROCESSED_INVOICES_PATH:
+    PROCESSED_INVOICES_PATH = os.path.abspath(PROCESSED_INVOICES_PATH)
+    os.makedirs(PROCESSED_INVOICES_PATH, exist_ok=True)
 # =====================================================
 # MODEL CONFIGURATION
 # =====================================================
@@ -59,6 +58,9 @@ SUPPORTED_PDF_EXTENSION = ['.pdf']
 # Temporary file settings
 TEMP_DIR = os.getenv("TEMP_DIR", "./data/temp")
 os.makedirs(TEMP_DIR, exist_ok=True)
+
+# Local storage path alias for backwards compatibility
+LOCAL_STORAGE_PATH = PROCESSED_INVOICES_PATH
 
 # =====================================================
 # HELPER FUNCTIONS

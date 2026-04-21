@@ -34,6 +34,7 @@ class PostgresClient:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
                 print(f"🔍 [DEBUG] Executing SQL: {query[:200]}...")
                 if params:
+                    # Truncate long params for display
                     params_display = []
                     for p in params:
                         if isinstance(p, str) and len(p) > 100:
@@ -44,18 +45,22 @@ class PostgresClient:
                 
                 cur.execute(query, params)
                 
+                # Handle different query types
                 if fetch_one:
                     result = cur.fetchone()
+                    conn.commit()  # CRITICAL: Commit after fetch
                     print(f"🔍 [DEBUG] fetch_one result: {result}")
                     return result
                 elif fetch_all:
                     result = cur.fetchall()
+                    conn.commit()  # CRITICAL: Commit after fetch
                     print(f"🔍 [DEBUG] fetch_all returned {len(result) if result else 0} rows")
                     return result
                 else:
-                    conn.commit()
+                    conn.commit()  # Commit for INSERT/UPDATE/DELETE without RETURNING
                     print(f"🔍 [DEBUG] Query committed successfully")
                     return None
+                    
         except Exception as e:
             print(f"❌ [DEBUG] Database error: {e}")
             print(f"❌ [DEBUG] Failed query: {query}")
@@ -65,6 +70,7 @@ class PostgresClient:
             raise e
         finally:
             self.pool.putconn(conn)
+
 
 # Create a global instance
 db = PostgresClient()

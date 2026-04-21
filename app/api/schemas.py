@@ -79,3 +79,20 @@ class HealthResponse(BaseModel):
     database: str
     storage: str
     version: str
+
+
+# Add these new classes at the end of the file
+
+class ExternalInvoiceRequest(BaseModel):
+    """Request schema from other department."""
+    invoicename: str
+    rack_no: str
+    voucher: str
+    date: str  # Format: YYYY-MM-DD
+
+
+class ExternalInvoiceResponse(BaseModel):
+    """Response schema for other department."""
+    status: str  # "success" or "failed"
+    message: str
+    invoice_id: Optional[int] = None

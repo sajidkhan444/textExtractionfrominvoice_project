@@ -8,7 +8,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.api.routes import router
+
+# Serve local data directory for direct file access
+DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data"))
+os.makedirs(DATA_DIR, exist_ok=True)
 
 # Create FastAPI app
 app = FastAPI(
@@ -27,6 +32,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount static file directory for direct access to /data/*
+app.mount("/data", StaticFiles(directory=DATA_DIR), name="data")
 
 # Include routers
 app.include_router(router, prefix="/api/v1")

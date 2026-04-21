@@ -2,21 +2,25 @@
 
 import os
 import shutil
-from app.config import LOCAL_STORAGE_PATH
+from app.config import PROCESSED_INVOICES_PATH
+from app.utils.helpers import get_unique_filename
 
 
 def ensure_storage_dir():
     """Ensure storage directory exists."""
-    os.makedirs(LOCAL_STORAGE_PATH, exist_ok=True)
+    os.makedirs(PROCESSED_INVOICES_PATH, exist_ok=True)
 
 
 def upload_image_to_storage(local_image_path, image_filename):
-    """Copy image to local storage folder."""
+    """Copy image to local storage folder with duplicate handling."""
     try:
         ensure_storage_dir()
         
+        # Use the same filename (already made unique by generate_filename_from_company)
+        # Don't add another suffix
+        
         # Destination path
-        dest_path = os.path.join(LOCAL_STORAGE_PATH, image_filename)
+        dest_path = os.path.join(PROCESSED_INVOICES_PATH, image_filename)
         
         # Copy file
         shutil.copy2(local_image_path, dest_path)
@@ -35,12 +39,12 @@ def upload_image_to_storage(local_image_path, image_filename):
 
 def get_image_path(image_filename):
     """Get full local path for an image."""
-    return os.path.join(LOCAL_STORAGE_PATH, image_filename)
+    return os.path.join(PROCESSED_INVOICES_PATH, image_filename)
 
 
 def get_image_url(image_filename):
     """Get URL/path for an image."""
-    return os.path.join(LOCAL_STORAGE_PATH, image_filename)
+    return os.path.join(PROCESSED_INVOICES_PATH, image_filename)
 
 
 def list_all_images():
@@ -48,9 +52,9 @@ def list_all_images():
     try:
         ensure_storage_dir()
         images = []
-        for filename in os.listdir(LOCAL_STORAGE_PATH):
+        for filename in os.listdir(PROCESSED_INVOICES_PATH):
             if filename.endswith(('.jpg', '.jpeg', '.png')):
-                file_path = os.path.join(LOCAL_STORAGE_PATH, filename)
+                file_path = os.path.join(PROCESSED_INVOICES_PATH, filename)
                 stat = os.stat(file_path)
                 images.append({
                     'name': filename,
@@ -65,7 +69,7 @@ def list_all_images():
 def delete_image(image_filename):
     """Delete an image from local storage."""
     try:
-        file_path = os.path.join(LOCAL_STORAGE_PATH, image_filename)
+        file_path = os.path.join(PROCESSED_INVOICES_PATH, image_filename)
         if os.path.exists(file_path):
             os.remove(file_path)
             return {'success': True}
@@ -76,5 +80,5 @@ def delete_image(image_filename):
 
 def image_exists(image_filename):
     """Check if an image exists in storage."""
-    file_path = os.path.join(LOCAL_STORAGE_PATH, image_filename)
+    file_path = os.path.join(PROCESSED_INVOICES_PATH, image_filename)
     return os.path.exists(file_path)

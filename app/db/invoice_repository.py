@@ -7,13 +7,13 @@ from app.db.postgres_client import db
 
 
 def get_last_invoice_id():
-    """Get the last invoice ID from database."""
+    """Get the last invoice ID from database (any invoice)."""
     try:
         query = "SELECT invoice_id FROM invoices ORDER BY invoice_id DESC LIMIT 1"
         result = db.execute_query(query, fetch_one=True)
-        if result:
+        if result and result['invoice_id']:
             return result['invoice_id']
-        return 0
+        return 0  # Return 0 if no invoices exist
     except Exception as e:
         print(f"⚠️ Database error: {e}")
         return 0
@@ -174,3 +174,159 @@ def update_invoice_image_path(invoice_id, image_path):
         return {'success': False, 'error': 'Invoice not found'}
     except Exception as e:
         return {'success': False, 'error': str(e)}
+    
+
+# Add these functions at the end of the file
+
+def get_last_completed_invoice_id():
+    """Get the last invoice ID where invoice_image_path is NOT NULL (completed processing)."""
+    try:
+        query = """
+            SELECT invoice_id FROM invoices 
+            WHERE invoice_image_path IS NOT NULL 
+            ORDER BY invoice_id DESC LIMIT 1
+        """
+        result = db.execute_query(query, fetch_one=True)
+        if result and result['invoice_id']:
+            return result['invoice_id']
+        # If no completed invoice exists, return 0 (start from inv_1.jpg)
+        return 0
+    except Exception as e:
+        print(f"⚠️ Database error in get_last_completed_invoice_id: {e}")
+        return 0
+
+
+def create_external_placeholder(invoicename, rack_no, voucher, date, image_path):
+    """Create a placeholder row with metadata from other department."""
+    try:
+        query = """
+            INSERT INTO invoices (
+                invoicename,
+                rack_no,
+                voucher,
+                date,
+                image,
+                status
+            ) VALUES (%s, %s, %s, %s, %s, %s::invoice_status)
+            RETURNING invoice_id
+        """
+        
+        params = (
+            invoicename,
+            rack_no,
+            voucher,
+            date,
+            image_path,
+            'processing'  # Valid enum value
+        )
+        
+        result = db.execute_query(query, params, fetch_one=True)
+        
+        if result:
+            print(f"   ✅ External placeholder created! ID: {result['invoice_id']} (status: processing)")
+            return {
+                'success': True,
+                'invoice_id': result['invoice_id']
+            }
+        return {'success': False, 'error': 'No data returned'}
+    except Exception as e:
+        print(f"   ❌ External placeholder creation error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def update_external_invoice(invoice_id, company_name, phone_number, strn, ntn, 
+                             order_number, invoice_number, invoice_date, 
+                             clean_json, raw_ocr_json, invoice_image_path):
+    """Update existing external invoice with AI extraction results."""
+    try:
+        print(f"🔍 [DEBUG] Updating invoice_id: {invoice_id}")
+        print(f"🔍 [DEBUG] invoice_image_path to save: {invoice_image_path}")
+        
+        # First check if the invoice exists
+        check_query = "SELECT invoice_id FROM invoices WHERE invoice_id = %s"
+        check_result = db.execute_query(check_query, (invoice_id,), fetch_one=True)
+        
+        if not check_result:
+            print(f"   ❌ Invoice ID {invoice_id} not found in database!")
+            return {'success': False, 'error': f'Invoice ID {invoice_id} not found'}
+        
+        query = """
+            UPDATE invoices 
+            SET company_name = %s,
+                phone_number = %s,
+                strn = %s,
+                ntn = %s,
+                order_number = %s,
+                invoice_number = %s,
+                invoice_date = %s,
+                clean_json = %s,
+                raw_ocr_json = %s,
+                invoice_image_path = %s,
+                created_at = %s
+            WHERE invoice_id = %s
+            RETURNING invoice_id
+        """
+        
+        params = (
+            company_name if company_name else None,
+            phone_number if phone_number else None,
+            strn if strn else None,
+            ntn if ntn else None,
+            order_number if order_number else None,
+            invoice_number if invoice_number else None,
+            invoice_date if invoice_date else None,
+            json.dumps(clean_json) if clean_json else None,
+            json.dumps(raw_ocr_json) if raw_ocr_json else None,
+            invoice_image_path,
+            datetime.now(),
+            invoice_id
+        )
+        
+        result = db.execute_query(query, params, fetch_one=True)
+        
+        if result:
+            print(f"   ✅ External invoice {invoice_id} updated with extraction results!")
+            return {'success': True, 'invoice_id': result['invoice_id']}
+        else:
+            print(f"   ❌ No rows updated for invoice_id: {invoice_id}")
+            return {'success': False, 'error': f'No rows updated for invoice_id {invoice_id}'}
+            
+    except Exception as e:
+        print(f"   ❌ External update error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'success': False, 'error': str(e)}
+    
+    
+def update_invoice_status(invoice_id, status):
+    """Update the status of an invoice."""
+    try:
+        # Map status to valid enum values
+        status_mapping = {
+            'processing': 'processing',
+            'approved': 'approved',
+            'rejected': 'rejected',
+            'failed': 'rejected',  # Map 'failed' to 'rejected'
+            'completed': 'approved'  # Map 'completed' to 'approved'
+        }
+        
+        db_status = status_mapping.get(status, status)
+        
+        query = """
+            UPDATE invoices 
+            SET status = %s::invoice_status
+            WHERE invoice_id = %s
+            RETURNING invoice_id
+        """
+        
+        params = (db_status, invoice_id)
+        result = db.execute_query(query, params, fetch_one=True)
+        
+        if result:
+            print(f"   ✅ Invoice {invoice_id} status updated to: {db_status}")
+            return {'success': True}
+        return {'success': False, 'error': f'Invoice {invoice_id} not found'}
+    except Exception as e:
+        print(f"   ❌ Status update error: {e}")
+        return {'success': False, 'error': str(e)}
+    
