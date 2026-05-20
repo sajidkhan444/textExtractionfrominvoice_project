@@ -7,7 +7,7 @@ def load_model_and_tokenizer():
     """Load Qwen model and tokenizer."""
     from app.core.constants import MODEL_NAME
     
-    print("🔄 Loading Qwen 2.5 3B...")
+    print("🔄 Loading Qwen 2.5 1.5..")
     
     tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
     

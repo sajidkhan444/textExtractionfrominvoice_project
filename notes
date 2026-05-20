@@ -1,0 +1,22 @@
+Available Endpoints:
+Production APIs (For Frontend Dashboard):
+text
+POST   /api/documents/upload          # Upload PDF or image
+GET    /api/documents                 # List all documents
+GET    /api/documents/{id}            # Get document by ID
+GET    /api/documents/search?query=   # Search documents
+GET    /api/documents/stats           # Get statistics
+GET    /api/documents/health          # Health check
+Testing APIs (For Developers):
+text
+POST   /api/documents/test/process     # Test single image with debug
+POST   /api/documents/test/upload      # Test PDF/image with debug
+GET    /api/documents/test/info        # Testing API information
+Invoice APIs (Existing):
+text
+POST   /api/v1/upload                  # Upload invoice
+GET    /api/v1/invoices                # List invoices
+GET    /api/v1/invoices/{id}           # Get invoice by ID
+GET    /api/v1/search                  # Search invoices
+GET    /api/v1/stats                   # Get statistics
+GET    /api/v1/health                  # Health check

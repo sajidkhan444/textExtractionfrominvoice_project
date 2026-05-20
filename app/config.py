@@ -66,6 +66,16 @@ LOCAL_STORAGE_PATH = PROCESSED_INVOICES_PATH
 # HELPER FUNCTIONS
 # =====================================================
 
+# Add to app/config.py
+
+# Document Storage Path for processed document images
+DOCUMENT_STORAGE_PATH = os.getenv("DOCUMENT_STORAGE_PATH", "./data/documents")
+
+# Ensure the document storage path exists
+if DOCUMENT_STORAGE_PATH:
+    DOCUMENT_STORAGE_PATH = os.path.abspath(DOCUMENT_STORAGE_PATH)
+    os.makedirs(DOCUMENT_STORAGE_PATH, exist_ok=True)
+
 def get_db_connection_string():
     """Get PostgreSQL connection string."""
     return f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
