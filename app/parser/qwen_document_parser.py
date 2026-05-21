@@ -3,6 +3,7 @@
 import re
 import json
 import torch
+import concurrent.futures
 from app.core.documents_prompts import get_document_extraction_prompt
 
 
@@ -62,12 +63,13 @@ class QwenDocumentParser:
             inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=2048)
             inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
 
+            # Only use compatible parameters
             with torch.no_grad():
                 generated_ids = self.model.generate(
                     **inputs,
                     max_new_tokens=512,
-                    do_sample=False,
-                    pad_token_id=self.tokenizer.eos_token_id
+                    pad_token_id=self.tokenizer.eos_token_id,
+                    eos_token_id=self.tokenizer.eos_token_id
                 )
 
             generated_ids = generated_ids[0][len(inputs['input_ids'][0]):]
@@ -282,8 +284,18 @@ class QwenDocumentParser:
         print(f"📊 Total characters: {len(ocr_text)}")
         print(f"📄 OCR Text Preview: {ocr_text[:300]}...")
 
-        # Try Qwen extraction first
-        parsed_data = self.extract_fields_with_qwen(ocr_text)
+        # Try Qwen extraction with timeout
+        parsed_data = None
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(self.extract_fields_with_qwen, ocr_text)
+                parsed_data = future.result(timeout=45)  # 45 second timeout
+        except concurrent.futures.TimeoutError:
+            print("⚠️ Qwen extraction timed out after 45 seconds, using fallback")
+            parsed_data = None
+        except Exception as e:
+            print(f"⚠️ Qwen extraction error: {e}")
+            parsed_data = None
 
         if parsed_data and any(v for v in parsed_data.values() if v):
             # Clean and validate
