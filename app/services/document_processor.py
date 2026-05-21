@@ -328,9 +328,20 @@ class DocumentProcessor:
         if not ocr_dict:
             return {"success": False, "error": "No text extracted"}
         
+        # Debug: Print dictionary structure
+        print(f"\n📊 OCR Dictionary Preview:")
+        for key, value in list(ocr_dict.items())[:5]:
+            print(f"   {key}: {value[:50]}..." if len(value) > 50 else f"   {key}: {value}")
+        
         if self.qwen_parser:
-            # Pass dictionary to Qwen (same format as invoice module)
-            extracted_fields = self.qwen_parser.process(ocr_dict)
+            try:
+                # Pass dictionary to Qwen
+                extracted_fields = self.qwen_parser.process(ocr_dict)
+            except Exception as e:
+                print(f"Qwen processing error: {e}")
+                import traceback
+                traceback.print_exc()
+                extracted_fields = self._fallback_extraction(str(ocr_dict))
             
             # Clean amount if present
             if extracted_fields and extracted_fields.get('total_amount'):

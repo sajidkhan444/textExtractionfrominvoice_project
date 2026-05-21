@@ -22,6 +22,22 @@ class QwenDocumentParser:
         self.model.eval()  # Set to evaluation mode
         print("✅ Document Qwen parser initialized")
 
+    def _convert_to_text(self, ocr_input):
+        """Convert various input formats to text string"""
+        if isinstance(ocr_input, dict):
+            # Convert dictionary to text lines
+            lines = []
+            for key, value in ocr_input.items():
+                if isinstance(value, str) and value.strip():
+                    lines.append(value.strip())
+            return '\n'.join(lines)
+        elif isinstance(ocr_input, str):
+            return ocr_input
+        elif isinstance(ocr_input, list):
+            return '\n'.join([str(item) for item in ocr_input])
+        else:
+            return str(ocr_input)
+
     def extract_fields_with_qwen(self, ocr_text):
         """Extract fields from OCR text using document-specific prompt"""
         
@@ -46,7 +62,7 @@ class QwenDocumentParser:
             model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
 
             # Generate with optimized parameters
-            with torch.no_grad():  # Disable gradient calculation for inference
+            with torch.no_grad():
                 generated_ids = self.model.generate(
                     **model_inputs,
                     max_new_tokens=512,
@@ -125,15 +141,13 @@ class QwenDocumentParser:
                 elif re.search(r'nayapay', ocr_text, re.IGNORECASE):
                     parsed_data["bank_name"] = "NayaPay"
                 elif re.search(r'ubl|allied|meezan|hbl|nbp|mcb', ocr_text, re.IGNORECASE):
-                    # Extract bank name from text
-                    bank_match = re.search(r'(UBL|Allied|Meezan|HBL|NBP|MCB)\s*Bank', ocr_text, re.IGNORECASE)
+                    bank_match = re.search(r'(UBL|Allied|Meezan|HBL|NBP|MCB)', ocr_text, re.IGNORECASE)
                     if bank_match:
                         parsed_data["bank_name"] = bank_match.group(1)
 
-        # Clean total_amount - remove commas, keep decimals
+        # Clean total_amount
         if parsed_data.get("total_amount") and parsed_data["total_amount"] not in [None, "null", "None"]:
             amount = str(parsed_data["total_amount"])
-            # Extract numeric value
             amount_match = re.search(r'([\d,]+\.?\d*)', amount)
             if amount_match:
                 amount = amount_match.group(1).replace(',', '')
@@ -196,7 +210,7 @@ class QwenDocumentParser:
         if not parsed_data.get("sender_name") and parsed_data.get("account_title"):
             parsed_data["sender_name"] = parsed_data["account_title"]
 
-        # Clean receiver_name (remove extra text)
+        # Clean receiver_name
         if parsed_data.get("receiver_name") and parsed_data["receiver_name"] not in [None, "null", "None"]:
             name = str(parsed_data["receiver_name"])
             name = re.sub(r'\([^)]*\)', '', name)
@@ -208,7 +222,7 @@ class QwenDocumentParser:
         if parsed_data.get("account_title") and parsed_data["account_title"] not in [None, "null", "None"]:
             name = str(parsed_data["account_title"])
             name = re.sub(r'(Sent by|Sender|From|Account Title):\s*', '', name, flags=re.IGNORECASE)
-            name = re.sub(r'\s+\d+$', '', name)  # Remove trailing numbers
+            name = re.sub(r'\s+\d+$', '', name)
             name = name.strip()
             parsed_data["account_title"] = name if len(name) > 2 else None
 
@@ -224,12 +238,15 @@ class QwenDocumentParser:
 
         return parsed_data
 
-    def process(self, ocr_text):
-        """Process OCR text and return extracted fields"""
+    def process(self, ocr_input):
+        """Process OCR input (string or dict) and return extracted fields"""
         print("\n" + "="*60)
         print("🏦 QWEN DOCUMENT PARSER")
         print("📱 Bank Cheques | Deposit Slips | Digital Receipts")
         print("="*60)
+
+        # Convert input to text string
+        ocr_text = self._convert_to_text(ocr_input)
 
         if not ocr_text or len(ocr_text) < 10:
             print("❌ No valid text extracted from input")

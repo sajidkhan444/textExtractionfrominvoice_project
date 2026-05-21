@@ -1,4 +1,4 @@
-# app/ocr/document_ocr.py
+# app/ocr/document_ocr.py - Fixed dictionary format
 
 import cv2
 import re
@@ -7,7 +7,7 @@ from typing import Tuple, Dict
 from paddleocr import PaddleOCR
 
 class DocumentOCR:
-    """OCR handler for document processing - PaddleOCR 2.x compatible"""
+    """OCR handler for document processing"""
     
     def __init__(self):
         self.ocr = None
@@ -21,7 +21,6 @@ class DocumentOCR:
             print("📌 Loading PaddleOCR for documents...")
             os.environ["FLAGS_allocator_strategy"] = "auto_growth"
             
-            # Working configuration from yesterday
             self.ocr = PaddleOCR(
                 lang='en',
                 text_recognition_model_name="PP-OCRv5_server_rec",
@@ -36,10 +35,7 @@ class DocumentOCR:
             self.ocr = None
     
     def extract_full_document_as_dict(self, image_path: str) -> Dict:
-        """
-        Extract all text and return as dictionary with line_XX format
-        (Same format as EasyOCR invoice module)
-        """
+        """Extract all text and return as dictionary with line_XX format"""
         if self.ocr is None:
             return {}
         
@@ -49,10 +45,9 @@ class DocumentOCR:
             if result and len(result) > 0 and isinstance(result[0], dict):
                 texts = result[0].get('rec_texts', [])
                 
-                # Convert to dictionary with line_XX format
                 ocr_dict = {}
                 for idx, text in enumerate(texts, start=1):
-                    ocr_dict[f"line_{idx:02d}"] = text
+                    ocr_dict[f"line_{idx:02d}"] = text.strip() if text else ""
                 
                 print(f"📝 Extracted {len(texts)} lines of text")
                 return ocr_dict
@@ -60,7 +55,7 @@ class DocumentOCR:
             return {}
             
         except Exception as e:
-            print(f"OCR Error: {e}")
+            print(f"OCR Error in extract_full_document_as_dict: {e}")
             return {}
     
     def extract_full_document(self, image_path: str) -> str:
@@ -79,13 +74,11 @@ class DocumentOCR:
                     return full_text
             return ""
         except Exception as e:
-            print(f"OCR Error: {e}")
+            print(f"OCR Error in extract_full_document: {e}")
             return ""
     
     def extract_from_crop(self, cropped_image: np.ndarray, field_name: str = "") -> Tuple[str, float]:
-        """
-        Extract text from cropped image using predict() method
-        """
+        """Extract text from cropped image"""
         if self.ocr is None or cropped_image is None or cropped_image.size == 0:
             return "", 0.0
 
@@ -111,7 +104,7 @@ class DocumentOCR:
             return "", 0.0
 
         except Exception as e:
-            print(f"OCR Error: {e}")
+            print(f"OCR Error in extract_from_crop: {e}")
             return "", 0.0
     
     def _postprocess_text(self, text: str, field_name: str) -> str:
