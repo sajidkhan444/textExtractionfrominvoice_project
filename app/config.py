@@ -1,4 +1,4 @@
-"""Configuration management."""
+# app/config.py
 
 import os
 from dotenv import load_dotenv
@@ -21,13 +21,28 @@ DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 # STORAGE CONFIGURATION
 # =====================================================
 
-# Processed Invoices Path (inside project)
-PROCESSED_INVOICES_PATH = os.getenv("PROCESSED_INVOICES_PATH", "./data/processed_invoices")
+# Local Storage Path for invoice images (permanent storage)
+LOCAL_STORAGE_PATH = os.getenv("LOCAL_STORAGE_PATH", "./data/invoices")
 
 # Ensure the storage path exists
+if LOCAL_STORAGE_PATH:
+    LOCAL_STORAGE_PATH = os.path.abspath(LOCAL_STORAGE_PATH)
+    os.makedirs(LOCAL_STORAGE_PATH, exist_ok=True)
+
+# Processed invoices path (for completed invoices)
+PROCESSED_INVOICES_PATH = os.getenv("PROCESSED_INVOICES_PATH", "./data/invoices/processed")
+
 if PROCESSED_INVOICES_PATH:
     PROCESSED_INVOICES_PATH = os.path.abspath(PROCESSED_INVOICES_PATH)
     os.makedirs(PROCESSED_INVOICES_PATH, exist_ok=True)
+
+# Document Storage Path for processed document images
+DOCUMENT_STORAGE_PATH = os.getenv("DOCUMENT_STORAGE_PATH", "./data/output/documents")
+
+if DOCUMENT_STORAGE_PATH:
+    DOCUMENT_STORAGE_PATH = os.path.abspath(DOCUMENT_STORAGE_PATH)
+    os.makedirs(DOCUMENT_STORAGE_PATH, exist_ok=True)
+
 # =====================================================
 # MODEL CONFIGURATION
 # =====================================================
@@ -59,22 +74,9 @@ SUPPORTED_PDF_EXTENSION = ['.pdf']
 TEMP_DIR = os.getenv("TEMP_DIR", "./data/temp")
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-# Local storage path alias for backwards compatibility
-LOCAL_STORAGE_PATH = PROCESSED_INVOICES_PATH
-
 # =====================================================
 # HELPER FUNCTIONS
 # =====================================================
-
-# Add to app/config.py
-
-# Document Storage Path for processed document images
-DOCUMENT_STORAGE_PATH = os.getenv("DOCUMENT_STORAGE_PATH", "./data/documents")
-
-# Ensure the document storage path exists
-if DOCUMENT_STORAGE_PATH:
-    DOCUMENT_STORAGE_PATH = os.path.abspath(DOCUMENT_STORAGE_PATH)
-    os.makedirs(DOCUMENT_STORAGE_PATH, exist_ok=True)
 
 def get_db_connection_string():
     """Get PostgreSQL connection string."""
@@ -84,6 +86,14 @@ def get_storage_path():
     """Get the local storage path for invoice images."""
     return LOCAL_STORAGE_PATH
 
+def get_processed_invoices_path():
+    """Get the path for processed invoices."""
+    return PROCESSED_INVOICES_PATH
+
+def get_document_storage_path():
+    """Get the local storage path for document images."""
+    return DOCUMENT_STORAGE_PATH
+
 def print_config():
     """Print current configuration."""
     print("\n" + "="*50)
@@ -91,6 +101,8 @@ def print_config():
     print("="*50)
     print(f"   DB: {DB_HOST}:{DB_PORT}/{DB_NAME}")
     print(f"   Storage: {LOCAL_STORAGE_PATH}")
+    print(f"   Processed Invoices: {PROCESSED_INVOICES_PATH}")
+    print(f"   Document Storage: {DOCUMENT_STORAGE_PATH}")
     print(f"   Model: {MODEL_NAME}")
     print(f"   OCR GPU: {OCR_GPU}")
     print(f"   Image DPI: {IMAGE_DPI}")

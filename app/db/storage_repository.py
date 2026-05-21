@@ -4,6 +4,7 @@ import os
 import shutil
 from app.config import PROCESSED_INVOICES_PATH
 from app.utils.helpers import get_unique_filename
+from app.config import LOCAL_STORAGE_PATH, PROCESSED_INVOICES_PATH
 
 
 def ensure_storage_dir():

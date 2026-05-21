@@ -2,6 +2,7 @@
 
 # Model name
 MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
+# MODEL_NAME = "Qwen/Qwen2.5-3B-Instruct"
 
 # Table stop words for detecting table headers
 TABLE_STOP_WORDS = [

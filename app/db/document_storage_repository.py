@@ -8,6 +8,7 @@ from app.core.documents_config import DocumentsConfig
 def ensure_output_dir():
     """Ensure output directory exists"""
     os.makedirs(DocumentsConfig.OUTPUT_FOLDER, exist_ok=True)
+    print(f"   Output directory: {DocumentsConfig.OUTPUT_FOLDER}")
 
 
 def save_processed_image(source_image_path, image_filename):
@@ -16,7 +17,7 @@ def save_processed_image(source_image_path, image_filename):
     
     Args:
         source_image_path: Path to the temporary processed image
-        image_filename: Permanent filename (e.g., payment_slip_17.jpg)
+        image_filename: Permanent filename (e.g., cheque_7.jpg, deposit_5.jpg, receipt_3.jpg)
     
     Returns:
         dict with success status and file info
@@ -58,3 +59,22 @@ def delete_processed_image(image_filename):
         return {'success': False, 'error': 'File not found'}
     except Exception as e:
         return {'success': False, 'error': str(e)}
+
+
+def list_all_processed_images():
+    """List all processed images in output folder."""
+    try:
+        ensure_output_dir()
+        images = []
+        for filename in os.listdir(DocumentsConfig.OUTPUT_FOLDER):
+            if filename.endswith(('.jpg', '.jpeg', '.png')):
+                file_path = os.path.join(DocumentsConfig.OUTPUT_FOLDER, filename)
+                stat = os.stat(file_path)
+                images.append({
+                    'name': filename,
+                    'size_bytes': stat.st_size,
+                    'created_at': stat.st_ctime
+                })
+        return {'success': True, 'images': images}
+    except Exception as e:
+        return {'success': False, 'error': str(e), 'images': []}

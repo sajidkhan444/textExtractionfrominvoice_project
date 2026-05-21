@@ -7,7 +7,7 @@ from app.db.postgres_client import db
 
 
 # ============================================
-# BANK CHEQUE TABLE (slip)
+# BANK CHEQUE TABLE (slip) - PLACEHOLDER & UPDATE
 # ============================================
 
 def get_last_cheque_id():
@@ -28,7 +28,43 @@ def get_next_cheque_name():
     return f"cheque_{next_id}.jpg"
 
 
-def insert_cheque_document(
+def create_slip_placeholder(slip_name, rack_no, voucher_number, image_path):
+    """Create a placeholder row in slip table with metadata."""
+    try:
+        query = """
+            INSERT INTO slip (
+                slip_name,
+                rack_no,
+                voucher_number,
+                cheque_image,
+                status,
+                created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """
+        
+        params = (
+            slip_name,
+            rack_no,
+            voucher_number,
+            image_path,
+            'processing',
+            datetime.now()
+        )
+        
+        result = db.execute_query(query, params, fetch_one=True)
+        
+        if result:
+            print(f"   ✅ Slip placeholder created! ID: {result['id']} (status: processing)")
+            return {'success': True, 'id': result['id']}
+        return {'success': False, 'error': 'No data returned'}
+    except Exception as e:
+        print(f"   ❌ Slip placeholder creation error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def update_slip_document(
+    slip_id,
     bank_cheque_name,
     account_holder_name,
     cheque_number,
@@ -36,18 +72,18 @@ def insert_cheque_document(
     cheque_amount,
     cheque_image_filename
 ):
-    """Insert bank cheque extraction result into slip table."""
+    """Update existing slip placeholder with extraction results."""
     try:
         query = """
-            INSERT INTO slip (
-                bank_cheque_name,
-                account_holder_name,
-                cheque_number,
-                iban,
-                cheque_amount,
-                cheque_image,
-                created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            UPDATE slip 
+            SET bank_cheque_name = %s,
+                account_holder_name = %s,
+                cheque_number = %s,
+                iban = %s,
+                cheque_amount = %s,
+                cheque_image = %s,
+                status = 'approved'
+            WHERE id = %s
             RETURNING id
         """
         
@@ -58,6 +94,52 @@ def insert_cheque_document(
             iban,
             cheque_amount,
             cheque_image_filename,
+            slip_id
+        )
+        
+        result = db.execute_query(query, params, fetch_one=True)
+        
+        if result:
+            print(f"   ✅ Slip {slip_id} updated with extraction results! Status: approved")
+            return {'success': True, 'id': result['id']}
+        return {'success': False, 'error': f'No rows updated for slip_id {slip_id}'}
+    except Exception as e:
+        print(f"   ❌ Slip update error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def insert_cheque_document(
+    bank_cheque_name,
+    account_holder_name,
+    cheque_number,
+    iban,
+    cheque_amount,
+    cheque_image_filename
+):
+    """Direct insert for bank cheque (legacy - use placeholder/update pattern instead)."""
+    try:
+        query = """
+            INSERT INTO slip (
+                bank_cheque_name,
+                account_holder_name,
+                cheque_number,
+                iban,
+                cheque_amount,
+                cheque_image,
+                status,
+                created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """
+        
+        params = (
+            bank_cheque_name,
+            account_holder_name,
+            cheque_number,
+            iban,
+            cheque_amount,
+            cheque_image_filename,
+            'approved',
             datetime.now()
         )
         
@@ -72,7 +154,7 @@ def insert_cheque_document(
 
 
 # ============================================
-# DEPOSIT SLIP TABLE (deposit)
+# DEPOSIT SLIP TABLE (deposit) - PLACEHOLDER & UPDATE
 # ============================================
 
 def get_last_deposit_id():
@@ -93,6 +175,92 @@ def get_next_deposit_name():
     return f"deposit_{next_id}.jpg"
 
 
+def create_deposit_placeholder(deposit_name, rack_no, voucher_number, image_path):
+    """Create a placeholder row in deposit table with metadata."""
+    try:
+        query = """
+            INSERT INTO deposit (
+                deposit_name,
+                rack_no,
+                voucher_number,
+                deposit_image,
+                status,
+                created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """
+        
+        params = (
+            deposit_name,
+            rack_no,
+            voucher_number,
+            image_path,
+            'processing',
+            datetime.now()
+        )
+        
+        result = db.execute_query(query, params, fetch_one=True)
+        
+        if result:
+            print(f"   ✅ Deposit placeholder created! ID: {result['id']} (status: processing)")
+            return {'success': True, 'id': result['id']}
+        return {'success': False, 'error': 'No data returned'}
+    except Exception as e:
+        print(f"   ❌ Deposit placeholder creation error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def update_deposit_document(
+    deposit_id,
+    bank_deposit_name,
+    account_title,
+    account_number,
+    depositor_name,
+    contact_number,
+    cnic,
+    deposit_amount,
+    deposit_image_filename
+):
+    """Update existing deposit placeholder with extraction results."""
+    try:
+        query = """
+            UPDATE deposit 
+            SET bank_deposit_name = %s,
+                account_title = %s,
+                account_number = %s,
+                depositor_name = %s,
+                contact_number = %s,
+                cnic = %s,
+                deposit_amount = %s,
+                deposit_image = %s,
+                status = 'approved'
+            WHERE id = %s
+            RETURNING id
+        """
+        
+        params = (
+            bank_deposit_name,
+            account_title,
+            account_number,
+            depositor_name,
+            contact_number,
+            cnic,
+            deposit_amount,
+            deposit_image_filename,
+            deposit_id
+        )
+        
+        result = db.execute_query(query, params, fetch_one=True)
+        
+        if result:
+            print(f"   ✅ Deposit {deposit_id} updated with extraction results! Status: approved")
+            return {'success': True, 'id': result['id']}
+        return {'success': False, 'error': f'No rows updated for deposit_id {deposit_id}'}
+    except Exception as e:
+        print(f"   ❌ Deposit update error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
 def insert_deposit_slip_document(
     bank_deposit_name,
     account_title,
@@ -104,7 +272,7 @@ def insert_deposit_slip_document(
     deposit_image_filename,
     serial_number=None
 ):
-    """Insert deposit slip extraction result into deposit table."""
+    """Direct insert for deposit slip (legacy - use placeholder/update pattern instead)."""
     try:
         query = """
             INSERT INTO deposit (
@@ -117,8 +285,9 @@ def insert_deposit_slip_document(
                 deposit_amount,
                 deposit_image,
                 serial_number,
+                status,
                 created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """
         
@@ -132,6 +301,7 @@ def insert_deposit_slip_document(
             deposit_amount,
             deposit_image_filename,
             serial_number,
+            'approved',
             datetime.now()
         )
         
@@ -146,7 +316,7 @@ def insert_deposit_slip_document(
 
 
 # ============================================
-# DIGITAL RECEIPT TABLE (receipt)
+# DIGITAL RECEIPT TABLE (receipt) - PLACEHOLDER & UPDATE
 # ============================================
 
 def get_last_receipt_id():
@@ -167,7 +337,43 @@ def get_next_receipt_name():
     return f"receipt_{next_id}.jpg"
 
 
-def insert_digital_receipt_document(
+def create_receipt_placeholder(receipt_name, rack_no, voucher_number, image_path):
+    """Create a placeholder row in receipt table with metadata."""
+    try:
+        query = """
+            INSERT INTO receipt (
+                receipt_name,
+                rack_no,
+                voucher_number,
+                digital_image,
+                status,
+                created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """
+        
+        params = (
+            receipt_name,
+            rack_no,
+            voucher_number,
+            image_path,
+            'processing',
+            datetime.now()
+        )
+        
+        result = db.execute_query(query, params, fetch_one=True)
+        
+        if result:
+            print(f"   ✅ Receipt placeholder created! ID: {result['id']} (status: processing)")
+            return {'success': True, 'id': result['id']}
+        return {'success': False, 'error': 'No data returned'}
+    except Exception as e:
+        print(f"   ❌ Receipt placeholder creation error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def update_receipt_document(
+    receipt_id,
     bank_digital_name,
     digital_amount,
     sender_name,
@@ -178,21 +384,21 @@ def insert_digital_receipt_document(
     payment_time,
     digital_image_filename
 ):
-    """Insert digital receipt extraction result into receipt table."""
+    """Update existing receipt placeholder with extraction results."""
     try:
         query = """
-            INSERT INTO receipt (
-                bank_digital_name,
-                digital_amount,
-                sender_name,
-                receiver_name,
-                reference_id,
-                phone_number,
-                payment_date,
-                payment_time,
-                digital_image,
-                created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            UPDATE receipt 
+            SET bank_digital_name = %s,
+                digital_amount = %s,
+                sender_name = %s,
+                receiver_name = %s,
+                reference_id = %s,
+                phone_number = %s,
+                payment_date = %s,
+                payment_time = %s,
+                digital_image = %s,
+                status = 'approved'
+            WHERE id = %s
             RETURNING id
         """
         
@@ -206,6 +412,61 @@ def insert_digital_receipt_document(
             payment_date,
             payment_time,
             digital_image_filename,
+            receipt_id
+        )
+        
+        result = db.execute_query(query, params, fetch_one=True)
+        
+        if result:
+            print(f"   ✅ Receipt {receipt_id} updated with extraction results! Status: approved")
+            return {'success': True, 'id': result['id']}
+        return {'success': False, 'error': f'No rows updated for receipt_id {receipt_id}'}
+    except Exception as e:
+        print(f"   ❌ Receipt update error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def insert_digital_receipt_document(
+    bank_digital_name,
+    digital_amount,
+    sender_name,
+    receiver_name,
+    reference_id,
+    phone_number,
+    payment_date,
+    payment_time,
+    digital_image_filename
+):
+    """Direct insert for digital receipt (legacy - use placeholder/update pattern instead)."""
+    try:
+        query = """
+            INSERT INTO receipt (
+                bank_digital_name,
+                digital_amount,
+                sender_name,
+                receiver_name,
+                reference_id,
+                phone_number,
+                payment_date,
+                payment_time,
+                digital_image,
+                status,
+                created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """
+        
+        params = (
+            bank_digital_name,
+            digital_amount,
+            sender_name,
+            receiver_name,
+            reference_id,
+            phone_number,
+            payment_date,
+            payment_time,
+            digital_image_filename,
+            'approved',
             datetime.now()
         )
         
@@ -216,6 +477,40 @@ def insert_digital_receipt_document(
         return {'success': False, 'error': 'No data returned'}
     except Exception as e:
         print(f"❌ Database insert error (digital receipt): {e}")
+        return {'success': False, 'error': str(e)}
+
+
+# ============================================
+# STATUS UPDATE FUNCTIONS
+# ============================================
+
+def update_document_status(document_id, table_name, status):
+    """Update the status of a document."""
+    try:
+        # Validate table name to prevent SQL injection
+        if table_name not in ['slip', 'deposit', 'receipt']:
+            raise ValueError(f"Invalid table name: {table_name}")
+        
+        # Validate status
+        if status not in ['processing', 'approved', 'failed']:
+            status = 'failed'
+        
+        query = f"""
+            UPDATE {table_name} 
+            SET status = %s
+            WHERE id = %s
+            RETURNING id
+        """
+        
+        params = (status, document_id)
+        result = db.execute_query(query, params, fetch_one=True)
+        
+        if result:
+            print(f"   ✅ Document {document_id} status updated to: {status}")
+            return {'success': True}
+        return {'success': False, 'error': f'Document {document_id} not found'}
+    except Exception as e:
+        print(f"   ❌ Status update error: {e}")
         return {'success': False, 'error': str(e)}
 
 
@@ -232,21 +527,24 @@ def search_documents(search_query):
         slip_query = """
             SELECT id, 'cheque' as type, bank_cheque_name as bank_name, 
                    account_holder_name as account_name, cheque_number,
-                   cheque_amount as amount, cheque_image as image, created_at
+                   cheque_amount as amount, cheque_image as image, status, created_at
             FROM slip 
             WHERE bank_cheque_name ILIKE %s 
                OR account_holder_name ILIKE %s 
                OR cheque_number ILIKE %s
                OR iban ILIKE %s
+               OR slip_name ILIKE %s
+               OR rack_no ILIKE %s
+               OR voucher_number ILIKE %s
         """
-        slip_params = (search_pattern, search_pattern, search_pattern, search_pattern)
+        slip_params = (search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern, search_pattern)
         slip_results = db.execute_query(slip_query, slip_params, fetch_all=True) or []
         
         # Search in deposit table
         deposit_query = """
             SELECT id, 'deposit' as type, bank_deposit_name as bank_name,
                    account_title as account_name, account_number, depositor_name,
-                   deposit_amount as amount, deposit_image as image, created_at
+                   deposit_amount as amount, deposit_image as image, status, created_at
             FROM deposit 
             WHERE bank_deposit_name ILIKE %s 
                OR account_title ILIKE %s 
@@ -254,23 +552,29 @@ def search_documents(search_query):
                OR depositor_name ILIKE %s
                OR cnic ILIKE %s
                OR contact_number ILIKE %s
+               OR deposit_name ILIKE %s
+               OR rack_no ILIKE %s
+               OR voucher_number ILIKE %s
         """
-        deposit_params = (search_pattern,) * 6
+        deposit_params = (search_pattern,) * 9
         deposit_results = db.execute_query(deposit_query, deposit_params, fetch_all=True) or []
         
         # Search in receipt table
         receipt_query = """
             SELECT id, 'receipt' as type, bank_digital_name as bank_name,
                    sender_name as account_name, receiver_name, reference_id,
-                   digital_amount as amount, digital_image as image, created_at
+                   digital_amount as amount, digital_image as image, status, created_at
             FROM receipt 
             WHERE bank_digital_name ILIKE %s 
                OR sender_name ILIKE %s 
                OR receiver_name ILIKE %s
                OR reference_id ILIKE %s
                OR phone_number ILIKE %s
+               OR receipt_name ILIKE %s
+               OR rack_no ILIKE %s
+               OR voucher_number ILIKE %s
         """
-        receipt_params = (search_pattern,) * 5
+        receipt_params = (search_pattern,) * 8
         receipt_results = db.execute_query(receipt_query, receipt_params, fetch_all=True) or []
         
         # Combine all results
@@ -312,7 +616,6 @@ def get_last_document_id():
 def get_next_document_name():
     """Generate next sequential document name (for compatibility)."""
     last_id = get_last_document_id()
-    # Ensure last_id is an integer
     if last_id is None:
         last_id = 0
     next_id = last_id + 1
@@ -324,15 +627,15 @@ def get_all_documents(limit=100, offset=0):
     try:
         query = """
             SELECT id, 'cheque' as type, bank_cheque_name as bank_name, 
-                   account_holder_name as account_name, created_at
+                   account_holder_name as account_name, status, created_at
             FROM slip
             UNION ALL
             SELECT id, 'deposit' as type, bank_deposit_name as bank_name,
-                   account_title as account_name, created_at
+                   account_title as account_name, status, created_at
             FROM deposit
             UNION ALL
             SELECT id, 'receipt' as type, bank_digital_name as bank_name,
-                   sender_name as account_name, created_at
+                   sender_name as account_name, status, created_at
             FROM receipt
             ORDER BY created_at DESC
             LIMIT %s OFFSET %s

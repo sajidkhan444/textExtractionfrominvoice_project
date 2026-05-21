@@ -6,17 +6,21 @@ import json
 import tempfile
 from pathlib import Path
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, HTTPException, BackgroundTasks, Query
+from fastapi import APIRouter, Form, UploadFile, File, HTTPException, BackgroundTasks, Query
 from fastapi.responses import JSONResponse, FileResponse
 from typing import Optional, List
 from pydantic import BaseModel
 
 from app.services.document_processor import DocumentProcessor
 from app.services.document_processor_service import process_document_file
-from app.db.document_repository import get_last_document_id, get_next_document_name, get_all_documents, get_document_by_id, count_documents, search_documents
+from app.db.document_repository import (
+    get_last_document_id, get_next_document_name, get_all_documents, 
+    get_document_by_id, count_documents, search_documents,
+    create_slip_placeholder, create_deposit_placeholder, create_receipt_placeholder,
+    update_slip_document, update_deposit_document, update_receipt_document,
+    update_document_status
+)
 from app.config import DOCUMENT_STORAGE_PATH
-# Should import from services, not directly from parser/ocr
-from app.services.document_processor import DocumentProcessor
 import uuid
 
 # Initialize router
@@ -39,20 +43,17 @@ def get_processor():
 @router.post("/api/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
+    document_name: str = Form(..., description="Document name (slip_name/deposit_name/receipt_name)"),
+    rack_no: str = Form(..., description="Rack number"),
+    voucher_number: str = Form(..., description="Voucher number"),
     return_crops: bool = Query(True, description="Return cropped field images for validation"),
     background_tasks: BackgroundTasks = None
 ):
     """
     PRODUCTION API - Frontend Dashboard Endpoint.
     
-    Supports both single images and PDF files.
-    - Single image: Processed directly, returns single result
-    - PDF: All pages extracted and processed sequentially, returns batch result
-    - return_crops: If true, returns cropped field images for validation
-    
-    Frontend developers should use this endpoint.
+    First creates a placeholder row with metadata, then processes and updates.
     """
-    from app.services.document_processor_service import process_document_file
     from app.services.document_processor import DocumentProcessor
     from app.core.documents_config import DocumentsConfig
     
@@ -86,7 +87,34 @@ async def upload_document(
         tmp_path = tmp_file.name
     
     try:
+        # Step 1: Classify document to determine table
         processor = DocumentProcessor()
+        doc_type, confidence = processor.classify_document(tmp_path)
+        
+        print(f"\n📋 Document classified as: {doc_type} (confidence: {confidence:.2%})")
+        
+        # Step 2: Create placeholder based on document type
+        placeholder_result = None
+        table_name = None
+        document_id = None
+        
+        if doc_type == "bank_cheque":
+            placeholder_result = create_slip_placeholder(document_name, rack_no, voucher_number, file.filename)
+            table_name = "slip"
+        elif doc_type == "bank_deposit_slips":
+            placeholder_result = create_deposit_placeholder(document_name, rack_no, voucher_number, file.filename)
+            table_name = "deposit"
+        else:
+            placeholder_result = create_receipt_placeholder(document_name, rack_no, voucher_number, file.filename)
+            table_name = "receipt"
+        
+        if not placeholder_result['success']:
+            raise HTTPException(status_code=500, detail=f"Failed to create placeholder: {placeholder_result['error']}")
+        
+        document_id = placeholder_result['id']
+        print(f"✅ Placeholder created with ID: {document_id} in table: {table_name} (status: processing)")
+        
+        # Step 3: Process the document
         result = process_document_file(tmp_path, file.filename, processor)
         
         # Restore original cropped folder
@@ -97,7 +125,6 @@ async def upload_document(
         if return_crops and os.path.exists(crop_session_folder):
             for filename in os.listdir(crop_session_folder):
                 if filename.endswith('.jpg'):
-                    # Extract field name from filename
                     parts = filename.replace('.jpg', '').split('_')
                     if len(parts) >= 2:
                         field_name = '_'.join(parts[1:-1]) if len(parts) > 2 else parts[1]
@@ -109,48 +136,88 @@ async def upload_document(
                         "url": f"/api/documents/crops/view/{session_id}/{filename}"
                     })
         
-        # Return format matching the invoice module structure
-        if result['type'] == 'pdf':
-            response_data = {
-                "success": result['successful'] > 0,
-                "type": "pdf",
-                "message": f"Processed {result['total']} pages, {result['successful']} successful",
-                "total_pages": result['total'],
-                "successful_pages": result['successful'],
-                "failed_pages": result['failed'],
-                "start_number": result.get('start_number'),
-                "end_number": result.get('end_number'),
-                "documents": result['results'],
-                "session_id": session_id
-            }
-            if return_crops:
-                response_data["crops"] = crop_files
-                response_data["crops_endpoint"] = f"/api/documents/crops/{session_id}"
-            return response_data
-        else:
+        # Step 4: Update placeholder with extraction results
+        if result['type'] == 'image' and result['results'][0]['success']:
             r = result['results'][0]
-            if r['success']:
-                response_data = {
-                    "success": True,
-                    "type": "image",
-                    "message": "Document processed successfully",
-                    "document_id": r['document_id'],
-                    "image_name": r['image_name'],
-                    "document_type": r['document_type'],
-                    "extracted_data": r['extracted_data'],
-                    "session_id": session_id
-                }
-                if return_crops:
-                    response_data["crops"] = crop_files
-                    response_data["crops_endpoint"] = f"/api/documents/crops/{session_id}"
-                return response_data
-            else:
+            extracted_data = r.get('extracted_data', {})
+            image_filename = r.get('image_name')
+            document_type = r.get('document_type')
+            
+            update_result = None
+            
+            if document_type == 'bank_cheque':
+                update_result = update_slip_document(
+                    slip_id=document_id,
+                    bank_cheque_name=extracted_data.get('bank_name'),
+                    account_holder_name=extracted_data.get('pay'),
+                    cheque_number=extracted_data.get('check_number'),
+                    iban=extracted_data.get('iban'),
+                    cheque_amount=extracted_data.get('amount'),
+                    cheque_image_filename=image_filename
+                )
+            elif document_type in ['bank_deposit_slip', 'bank_deposit_slips']:
+                update_result = update_deposit_document(
+                    deposit_id=document_id,
+                    bank_deposit_name=extracted_data.get('bank_name'),
+                    account_title=extracted_data.get('account_title'),
+                    account_number=extracted_data.get('account_number'),
+                    depositor_name=extracted_data.get('depositor_name'),
+                    contact_number=extracted_data.get('contact_number'),
+                    cnic=extracted_data.get('cnic'),
+                    deposit_amount=extracted_data.get('amount'),
+                    deposit_image_filename=image_filename
+                )
+            else:  # digital_receipt
+                update_result = update_receipt_document(
+                    receipt_id=document_id,
+                    bank_digital_name=extracted_data.get('bank_name'),
+                    digital_amount=extracted_data.get('total_amount'),
+                    sender_name=extracted_data.get('sender_name'),
+                    receiver_name=extracted_data.get('receiver_name'),
+                    reference_id=extracted_data.get('ref_id'),
+                    phone_number=extracted_data.get('sender_mobile'),
+                    payment_date=extracted_data.get('transaction_date'),
+                    payment_time=extracted_data.get('transaction_time'),
+                    digital_image_filename=image_filename
+                )
+            
+            if not update_result['success']:
+                update_document_status(document_id, table_name, 'failed')
                 return {
                     "success": False,
                     "type": "image",
-                    "message": "Document processing failed",
-                    "error": r.get('error')
+                    "message": "Extraction succeeded but database update failed",
+                    "error": update_result.get('error'),
+                    "document_id": document_id
                 }
+            
+            return {
+                "success": True,
+                "type": "image",
+                "message": "Document processed successfully",
+                "document_id": document_id,
+                "image_name": image_filename,
+                "document_type": document_type,
+                "extracted_data": extracted_data,
+                "session_id": session_id,
+                "metadata": {
+                    "document_name": document_name,
+                    "rack_no": rack_no,
+                    "voucher_number": voucher_number
+                },
+                "crops": crop_files if return_crops else None,
+                "crops_endpoint": f"/api/documents/crops/{session_id}" if return_crops else None
+            }
+        else:
+            # Processing failed, update status
+            update_document_status(document_id, table_name, 'failed')
+            return {
+                "success": False,
+                "type": "image",
+                "message": "Document processing failed",
+                "error": result.get('error', 'Unknown error'),
+                "document_id": document_id
+            }
     
     except Exception as e:
         DocumentsConfig.CROPPED_FOLDER = original_cropped_folder
@@ -180,7 +247,6 @@ async def get_cropped_images(session_id: str):
     if os.path.exists(crop_folder):
         for filename in os.listdir(crop_folder):
             if filename.endswith('.jpg'):
-                # Extract field name from filename
                 parts = filename.replace('.jpg', '').split('_')
                 if len(parts) >= 2:
                     field_name = '_'.join(parts[1:-1]) if len(parts) > 2 else parts[1]
@@ -481,7 +547,7 @@ async def test_upload_document(
         start_time = time.time()
         
         processor = DocumentProcessor()
-        result = process_document_file(tmp_path, file.filename, processor, save_crops=return_crops)
+        result = process_document_file(tmp_path, file.filename, processor, save_crops=save_crops)
         
         processing_time = time.time() - start_time
         
@@ -551,6 +617,11 @@ async def test_info():
             "upload": {
                 "url": "POST /api/documents/upload",
                 "description": "Upload PDF (all pages) or single image for processing",
+                "form_fields": {
+                    "document_name": "Document name (required)",
+                    "rack_no": "Rack number (required)",
+                    "voucher_number": "Voucher number (required)"
+                },
                 "query_params": {
                     "return_crops": "Return cropped field images for validation (true/false)"
                 }
@@ -568,8 +639,8 @@ async def test_info():
             "new_session": "GET /api/documents/crops/session/new"
         },
         "naming_convention": {
-            "single_image": "doc_{next_id}.jpg",
-            "pdf_pages": "doc_{start_id}.jpg, doc_{start_id+1}.jpg, ...",
+            "single_image": "cheque_X.jpg / deposit_X.jpg / receipt_X.jpg",
+            "pdf_pages": "cheque_{start_id}.jpg, deposit_{start_id+1}.jpg, ...",
             "storage_path": DOCUMENT_STORAGE_PATH
         }
     }
