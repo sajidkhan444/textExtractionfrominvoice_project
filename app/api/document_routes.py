@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from app.services.document_processor import DocumentProcessor
 from app.services.document_processor_service import process_document_file
 from app.db.document_repository import (
-    get_last_document_id, get_next_document_name, get_all_documents, 
+    get_last_document_id, get_all_documents, 
     get_document_by_id, count_documents, search_documents,
     create_slip_placeholder, create_deposit_placeholder, create_receipt_placeholder,
     update_slip_document, update_deposit_document, update_receipt_document,
@@ -43,7 +43,7 @@ def get_processor():
 @router.post("/api/documents/upload")
 async def upload_document(
     file: UploadFile = File(...),
-    document_name: str = Form(..., description="Document name (slip_name/deposit_name/receipt_name)"),
+    slip_name: str = Form(..., description="Document name (slip_name/deposit_name/receipt_name)"),
     rack_no: str = Form(..., description="Rack number"),
     voucher_number: str = Form(..., description="Voucher number"),
     return_crops: bool = Query(True, description="Return cropped field images for validation"),
@@ -99,13 +99,13 @@ async def upload_document(
         document_id = None
         
         if doc_type == "bank_cheque":
-            placeholder_result = create_slip_placeholder(document_name, rack_no, voucher_number, file.filename)
+            placeholder_result = create_slip_placeholder(slip_name, rack_no, voucher_number, file.filename)
             table_name = "slip"
         elif doc_type == "bank_deposit_slips":
-            placeholder_result = create_deposit_placeholder(document_name, rack_no, voucher_number, file.filename)
+            placeholder_result = create_deposit_placeholder(slip_name, rack_no, voucher_number, file.filename)
             table_name = "deposit"
         else:
-            placeholder_result = create_receipt_placeholder(document_name, rack_no, voucher_number, file.filename)
+            placeholder_result = create_receipt_placeholder(slip_name, rack_no, voucher_number, file.filename)
             table_name = "receipt"
         
         if not placeholder_result['success']:
@@ -201,7 +201,7 @@ async def upload_document(
                 "extracted_data": extracted_data,
                 "session_id": session_id,
                 "metadata": {
-                    "document_name": document_name,
+                    "slip_name": slip_name,
                     "rack_no": rack_no,
                     "voucher_number": voucher_number
                 },
@@ -376,12 +376,14 @@ async def get_document_stats():
     """Get document processing statistics."""
     count_result = count_documents()
     last_id = get_last_document_id()
-    next_name = get_next_document_name()
+    
+    # Get next name based on last ID
+    next_id = last_id + 1 if last_id else 1
     
     return {
         "total_documents": count_result.get('count', 0) if count_result['success'] else 0,
         "last_document_id": last_id,
-        "next_document_name": next_name,
+        "next_slip_name": f"slip_{next_id}.jpg",
         "storage_path": DOCUMENT_STORAGE_PATH
     }
 
@@ -618,7 +620,7 @@ async def test_info():
                 "url": "POST /api/documents/upload",
                 "description": "Upload PDF (all pages) or single image for processing",
                 "form_fields": {
-                    "document_name": "Document name (required)",
+                    "slip_name": "Document name (required)",
                     "rack_no": "Rack number (required)",
                     "voucher_number": "Voucher number (required)"
                 },
