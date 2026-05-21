@@ -19,7 +19,7 @@ class QwenDocumentParser:
         """
         self.model = model
         self.tokenizer = tokenizer
-        self.model.eval()  # Set to evaluation mode
+        self.model.eval()
         print("✅ Document Qwen parser initialized")
 
     def _convert_to_text(self, ocr_input):
@@ -59,25 +59,19 @@ class QwenDocumentParser:
                 add_generation_prompt=True
             )
 
-            model_inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=2048)
+            inputs = {k: v.to(self.model.device) for k, v in inputs.items()}
 
-            # Generate with optimized parameters
             with torch.no_grad():
                 generated_ids = self.model.generate(
-                    **model_inputs,
+                    **inputs,
                     max_new_tokens=512,
-                    temperature=0.1,
                     do_sample=False,
-                    repetition_penalty=1.2,
-                    pad_token_id=self.tokenizer.eos_token_id,
-                    eos_token_id=self.tokenizer.eos_token_id
+                    pad_token_id=self.tokenizer.eos_token_id
                 )
 
-            generated_ids = [
-                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-            ]
-
-            response = self.tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            generated_ids = generated_ids[0][len(inputs['input_ids'][0]):]
+            response = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
 
             # Parse JSON from response
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
@@ -113,6 +107,66 @@ class QwenDocumentParser:
             "iban": None
         }
 
+    def _fallback_extraction(self, ocr_text):
+        """Fallback extraction using regex when Qwen fails"""
+        extracted = self._empty_result()
+        
+        if not ocr_text:
+            return extracted
+        
+        # Extract amount
+        amount_match = re.search(r'Amount[\s:]*([0-9,]+\.?[0-9]*)', ocr_text, re.IGNORECASE)
+        if amount_match:
+            extracted['total_amount'] = amount_match.group(1).replace(',', '')
+        
+        # Extract reference ID
+        ref_match = re.search(r'ID#([0-9]+)', ocr_text)
+        if ref_match:
+            extracted['ref_id'] = ref_match.group(1)
+        
+        # Extract bank name
+        if 'easypaisa' in ocr_text.lower():
+            extracted['bank_name'] = 'Easypaisa'
+        elif 'jazzcash' in ocr_text.lower():
+            extracted['bank_name'] = 'JazzCash'
+        elif 'sadapay' in ocr_text.lower():
+            extracted['bank_name'] = 'SadaPay'
+        
+        # Extract sender name (after "Sent by")
+        sender_match = re.search(r'Sent by[\s:]*([A-Za-z\s]+)', ocr_text, re.IGNORECASE)
+        if sender_match:
+            extracted['sender_name'] = sender_match.group(1).strip()
+            extracted['account_title'] = extracted['sender_name']
+        
+        # Extract sender mobile
+        mobile_match = re.search(r'Sent by.*?(03[0-9]{9})', ocr_text, re.IGNORECASE)
+        if mobile_match:
+            extracted['sender_mobile'] = mobile_match.group(1)
+        
+        # Extract receiver name
+        receiver_match = re.search(r'Sent to[\s:]*([A-Za-z\s]+)', ocr_text, re.IGNORECASE)
+        if receiver_match:
+            extracted['receiver_name'] = receiver_match.group(1).strip()
+        
+        # Extract receiver mobile
+        receiver_mobile_match = re.search(r'Sent to.*?(03[0-9]{9})', ocr_text, re.IGNORECASE)
+        if receiver_mobile_match:
+            extracted['receiver_mobile'] = receiver_mobile_match.group(1)
+        
+        # Extract date
+        date_match = re.search(r'(\d{1,2}\s+[A-Za-z]+\s+\d{4})', ocr_text)
+        if not date_match:
+            date_match = re.search(r'(\d{1,2}/\d{1,2}/\d{4})', ocr_text)
+        if date_match:
+            extracted['transaction_date'] = date_match.group(1)
+        
+        # Extract time
+        time_match = re.search(r'(\d{1,2}:\d{2}\s*[AP]M)', ocr_text, re.IGNORECASE)
+        if time_match:
+            extracted['transaction_time'] = time_match.group(1)
+        
+        return extracted
+
     def clean_and_validate(self, ocr_text, parsed_data):
         """Clean and validate extracted fields with fallback"""
         if not parsed_data:
@@ -138,12 +192,6 @@ class QwenDocumentParser:
                     parsed_data["bank_name"] = "JazzCash"
                 elif re.search(r'sadapay', ocr_text, re.IGNORECASE):
                     parsed_data["bank_name"] = "SadaPay"
-                elif re.search(r'nayapay', ocr_text, re.IGNORECASE):
-                    parsed_data["bank_name"] = "NayaPay"
-                elif re.search(r'ubl|allied|meezan|hbl|nbp|mcb', ocr_text, re.IGNORECASE):
-                    bank_match = re.search(r'(UBL|Allied|Meezan|HBL|NBP|MCB)', ocr_text, re.IGNORECASE)
-                    if bank_match:
-                        parsed_data["bank_name"] = bank_match.group(1)
 
         # Clean total_amount
         if parsed_data.get("total_amount") and parsed_data["total_amount"] not in [None, "null", "None"]:
@@ -160,25 +208,6 @@ class QwenDocumentParser:
                     parsed_data["total_amount"] = None
             else:
                 parsed_data["total_amount"] = None
-
-        # Fallback amount extraction from OCR
-        if not parsed_data.get("total_amount") and ocr_text:
-            amount_patterns = [
-                r'Amount[\s:]*[Rs\.PKR]*[\s:]*([0-9,]+\.?[0-9]*)',
-                r'Total[\s:]*[Rs\.PKR]*[\s:]*([0-9,]+\.?[0-9]*)',
-                r'PKR[\s:]*([0-9,]+\.?[0-9]*)',
-                r'Rs\.?[\s:]*([0-9,]+\.?[0-9]*)',
-            ]
-            for pattern in amount_patterns:
-                match = re.search(pattern, ocr_text, re.IGNORECASE)
-                if match:
-                    amount = match.group(1).replace(',', '')
-                    try:
-                        if float(amount) > 0:
-                            parsed_data["total_amount"] = amount
-                            break
-                    except:
-                        continue
 
         # Clean sender_mobile
         if parsed_data.get("sender_mobile") and parsed_data["sender_mobile"] not in [None, "null", "None"]:
@@ -214,14 +243,12 @@ class QwenDocumentParser:
         if parsed_data.get("receiver_name") and parsed_data["receiver_name"] not in [None, "null", "None"]:
             name = str(parsed_data["receiver_name"])
             name = re.sub(r'\([^)]*\)', '', name)
-            name = re.sub(r'(Beneficiary|Receiver|To):\s*', '', name, flags=re.IGNORECASE)
             name = name.strip()
             parsed_data["receiver_name"] = name if len(name) > 2 else None
 
         # Clean account_title
         if parsed_data.get("account_title") and parsed_data["account_title"] not in [None, "null", "None"]:
             name = str(parsed_data["account_title"])
-            name = re.sub(r'(Sent by|Sender|From|Account Title):\s*', '', name, flags=re.IGNORECASE)
             name = re.sub(r'\s+\d+$', '', name)
             name = name.strip()
             parsed_data["account_title"] = name if len(name) > 2 else None
@@ -255,17 +282,19 @@ class QwenDocumentParser:
         print(f"📊 Total characters: {len(ocr_text)}")
         print(f"📄 OCR Text Preview: {ocr_text[:300]}...")
 
-        # Extract fields using Qwen
+        # Try Qwen extraction first
         parsed_data = self.extract_fields_with_qwen(ocr_text)
 
-        if parsed_data:
+        if parsed_data and any(v for v in parsed_data.values() if v):
             # Clean and validate
             parsed_data = self.clean_and_validate(ocr_text, parsed_data)
             print("✅ Extraction complete!")
             return parsed_data
         else:
-            print("❌ Extraction failed")
-            return self._empty_result()
+            print("⚠️ Qwen extraction failed, using fallback extraction")
+            parsed_data = self._fallback_extraction(ocr_text)
+            print("✅ Fallback extraction complete!")
+            return parsed_data
 
     def print_clean_json(self, data):
         """Print clean JSON output"""
@@ -277,12 +306,9 @@ class QwenDocumentParser:
         print("📊 EXTRACTED FIELDS - CLEAN JSON")
         print("="*60)
         
-        # Filter out null values for cleaner display
         non_null = {k: v for k, v in data.items() if v is not None}
-        
         print(json.dumps(non_null, indent=2, ensure_ascii=False))
         
-        # Summary
         print("\n" + "="*60)
         print("📈 EXTRACTION SUMMARY")
         print("="*60)
