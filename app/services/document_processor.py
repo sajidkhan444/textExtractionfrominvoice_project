@@ -322,14 +322,14 @@ class DocumentProcessor:
     
     def process_pipeline_b(self, image_path: str, save_crops: bool = False) -> Dict:
         """Pipeline B: Full OCR + Qwen for digital receipts"""
-        # Get OCR as dictionary (same format as invoice module)
+        # Get OCR as dictionary (line_XX format)
         ocr_dict = self.ocr_manager.extract_full_document_as_dict(image_path)
         
         if not ocr_dict:
             return {"success": False, "error": "No text extracted"}
         
         if self.qwen_parser:
-            # Pass the dictionary (same format as invoice module expects)
+            # Pass dictionary to Qwen (same format as invoice module)
             extracted_fields = self.qwen_parser.process(ocr_dict)
             
             # Clean amount if present
@@ -339,7 +339,7 @@ class DocumentProcessor:
                 phone = re.sub(r'\D', '', str(extracted_fields['sender_mobile']))
                 extracted_fields['sender_mobile'] = phone[:11] if phone.startswith('03') else None
         else:
-            # Fallback: use raw text extraction
+            # Fallback
             full_text = self.ocr_manager.extract_full_document(image_path)
             extracted_fields = self._fallback_extraction(full_text)
         
