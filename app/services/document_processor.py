@@ -1,4 +1,4 @@
-# app/services/document_processor.py (COMPLETE FIXED VERSION)
+# app/services/document_processor.py (COMPLETE FIXED VERSION - FALLBACK ONLY)
 
 import os
 import cv2
@@ -97,14 +97,9 @@ class DocumentProcessor:
         print("  │  ✅ OCR ready")
         
         print("  └─ Loading Qwen parser...")
-        try:
-            from app.dependencies import model, tokenizer
-            from app.parser.qwen_document_parser import QwenDocumentParser
-            self.qwen_parser = QwenDocumentParser(model, tokenizer)
-            print("     ✅ Document Qwen parser loaded (reusing existing model)")
-        except Exception as e:
-            print(f"     ⚠️ Error loading Qwen document parser: {e}")
-            self.qwen_parser = None
+        # Qwen disabled for testing - using fallback extraction only
+        self.qwen_parser = None
+        print("     ⚠️ Qwen parser disabled - using fallback extraction only")
         
         print("\n" + "="*60)
         print("✅ DOCUMENT PROCESSOR INITIALIZED")
@@ -321,8 +316,8 @@ class DocumentProcessor:
         return {"success": True, "document_type": "bank_deposit_slips", "extracted_data": output}
     
     def process_pipeline_b(self, image_path: str, save_crops: bool = False) -> Dict:
-        """Pipeline B: Full OCR + Qwen for digital receipts"""
-        # Get OCR as dictionary (line_XX format)
+        """Pipeline B: Full OCR + Fallback extraction for digital receipts (Qwen disabled)"""
+        # Get OCR as dictionary
         ocr_dict = self.ocr_manager.extract_full_document_as_dict(image_path)
         
         if not ocr_dict:
@@ -333,36 +328,29 @@ class DocumentProcessor:
         for key, value in list(ocr_dict.items())[:5]:
             print(f"   {key}: {value[:50]}..." if len(value) > 50 else f"   {key}: {value}")
         
-        if self.qwen_parser:
-            try:
-                # Pass dictionary to Qwen
-                extracted_fields = self.qwen_parser.process(ocr_dict)
-            except Exception as e:
-                print(f"Qwen processing error: {e}")
-                import traceback
-                traceback.print_exc()
-                extracted_fields = self._fallback_extraction(str(ocr_dict))
-            
-            # Clean amount if present
-            if extracted_fields and extracted_fields.get('total_amount'):
-                extracted_fields['total_amount'] = clean_amount_value(extracted_fields['total_amount'])
-            if extracted_fields and extracted_fields.get('sender_mobile'):
-                phone = re.sub(r'\D', '', str(extracted_fields['sender_mobile']))
-                extracted_fields['sender_mobile'] = phone[:11] if phone.startswith('03') else None
-        else:
-            # Fallback
-            full_text = self.ocr_manager.extract_full_document(image_path)
-            extracted_fields = self._fallback_extraction(full_text)
+        # Get raw text for fallback
+        full_text = self.ocr_manager.extract_full_document(image_path)
+        
+        # Use fallback extraction (Qwen disabled for speed)
+        print("\n📌 Using fallback extraction (Qwen disabled for testing)")
+        extracted_fields = self._fallback_extraction(full_text)
+        
+        # Clean amount if present
+        if extracted_fields and extracted_fields.get('total_amount'):
+            extracted_fields['total_amount'] = clean_amount_value(extracted_fields['total_amount'])
+        if extracted_fields and extracted_fields.get('sender_mobile'):
+            phone = re.sub(r'\D', '', str(extracted_fields['sender_mobile']))
+            extracted_fields['sender_mobile'] = phone[:11] if phone.startswith('03') else None
         
         print(f"\n📊 CLEAN DIGITAL RECEIPT DATA:")
         for k, v in extracted_fields.items():
             if v:
                 print(f"   {k}: {v}")
         
-        return {"success": True, "document_type": "digital_receipt", "extracted_data": extracted_fields, "full_text": str(ocr_dict)}
+        return {"success": True, "document_type": "digital_receipt", "extracted_data": extracted_fields, "full_text": full_text}
     
     def _fallback_extraction(self, text: str) -> Dict:
-        """Fallback extraction using regex"""
+        """Fallback extraction using regex - enhanced for digital receipts"""
         extracted = {
             "bank_name": None, "account_title": None, "total_amount": None,
             "ref_id": None, "sender_name": None, "sender_mobile": None,
@@ -370,13 +358,66 @@ class DocumentProcessor:
             "transaction_date": None, "transaction_time": None
         }
         
-        amount_match = re.search(r'(?:Total Amount|Amount|PKR|Rs\.?)[\s:]*([0-9,]+\.?[0-9]*)', text, re.IGNORECASE)
-        if amount_match:
-            extracted["total_amount"] = clean_amount_value(amount_match.group(1))
+        if not text:
+            return extracted
         
-        ref_match = re.search(r'(?:ID#|Ref#|Transaction ID)[\s:]*([A-Z0-9]+)', text, re.IGNORECASE)
+        # Bank name detection
+        text_lower = text.lower()
+        if 'easypaisa' in text_lower:
+            extracted["bank_name"] = "Easypaisa"
+        elif 'jazzcash' in text_lower:
+            extracted["bank_name"] = "JazzCash"
+        elif 'sadapay' in text_lower:
+            extracted["bank_name"] = "SadaPay"
+        
+        # Amount extraction
+        amount_match = re.search(r'Amount[\s:]*([0-9,]+\.?[0-9]*)', text, re.IGNORECASE)
+        if not amount_match:
+            amount_match = re.search(r'Total Amount[\s:]*[Rs\.PKR]*[\s:]*([0-9,]+\.?[0-9]*)', text, re.IGNORECASE)
+        if amount_match:
+            extracted["total_amount"] = amount_match.group(1).replace(',', '')
+        
+        # Reference ID extraction
+        ref_match = re.search(r'ID#([0-9]+)', text)
         if ref_match:
             extracted["ref_id"] = ref_match.group(1)
+        else:
+            ref_match = re.search(r'Transaction ID[\s:]*([0-9]+)', text, re.IGNORECASE)
+            if ref_match:
+                extracted["ref_id"] = ref_match.group(1)
+        
+        # Sender name and mobile
+        sender_match = re.search(r'Sent by[\s:]*([A-Za-z\s]+)', text, re.IGNORECASE)
+        if sender_match:
+            extracted["sender_name"] = sender_match.group(1).strip()
+            extracted["account_title"] = extracted["sender_name"]
+        
+        # Sender mobile
+        sender_mobile_match = re.search(r'Sent by.*?(03[0-9]{9})', text, re.IGNORECASE)
+        if sender_mobile_match:
+            extracted["sender_mobile"] = sender_mobile_match.group(1)
+        
+        # Receiver name
+        receiver_match = re.search(r'Sent to[\s:]*([A-Za-z\s]+)', text, re.IGNORECASE)
+        if receiver_match:
+            extracted["receiver_name"] = receiver_match.group(1).strip()
+        
+        # Receiver mobile
+        receiver_mobile_match = re.search(r'Sent to.*?(03[0-9]{9})', text, re.IGNORECASE)
+        if receiver_mobile_match:
+            extracted["receiver_mobile"] = receiver_mobile_match.group(1)
+        
+        # Date extraction
+        date_match = re.search(r'(\d{1,2}\s+[A-Za-z]+\s+\d{4})', text)
+        if not date_match:
+            date_match = re.search(r'(\d{1,2}/\d{1,2}/\d{4})', text)
+        if date_match:
+            extracted["transaction_date"] = date_match.group(1)
+        
+        # Time extraction
+        time_match = re.search(r'(\d{1,2}:\d{2}\s*[AP]M)', text, re.IGNORECASE)
+        if time_match:
+            extracted["transaction_time"] = time_match.group(1)
         
         return extracted
     
@@ -409,7 +450,7 @@ class DocumentProcessor:
         
         else:
             print(f"   ✅ Document is a DIGITAL RECEIPT")
-            print(f"   🔄 Routing to: PIPELINE B (Full OCR + Qwen)")
+            print(f"   🔄 Routing to: PIPELINE B (Full OCR + Fallback Extraction)")
             return self.process_pipeline_b(file_path, save_crops=save_crops)
     
     # ============================================
@@ -482,14 +523,11 @@ class DocumentProcessor:
         if not full_text:
             return {"success": False, "error": "No text extracted"}
         
-        if self.qwen_parser:
-            # Convert to dictionary format for consistency
-            ocr_dict = {"full_text": full_text}
-            extracted_fields = self.qwen_parser.process(ocr_dict)
-            if extracted_fields and extracted_fields.get('total_amount'):
-                extracted_fields['total_amount'] = clean_amount_value(extracted_fields['total_amount'])
-        else:
-            extracted_fields = self._fallback_extraction(full_text)
+        # Use fallback extraction
+        extracted_fields = self._fallback_extraction(full_text)
+        
+        if extracted_fields and extracted_fields.get('total_amount'):
+            extracted_fields['total_amount'] = clean_amount_value(extracted_fields['total_amount'])
         
         result = {"success": True, "extracted_data": extracted_fields}
         
