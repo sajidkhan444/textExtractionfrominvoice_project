@@ -322,14 +322,15 @@ class DocumentProcessor:
     
     def process_pipeline_b(self, image_path: str, save_crops: bool = False) -> Dict:
         """Pipeline B: Full OCR + Qwen for digital receipts"""
-        full_text = self.ocr_manager.extract_full_document(image_path)
+        # Get OCR as dictionary (same format as invoice module)
+        ocr_dict = self.ocr_manager.extract_full_document_as_dict(image_path)
         
-        if not full_text:
+        if not ocr_dict:
             return {"success": False, "error": "No text extracted"}
         
         if self.qwen_parser:
-            # Call the document parser directly with raw text
-            extracted_fields = self.qwen_parser.process(full_text)
+            # Pass the dictionary (same format as invoice module expects)
+            extracted_fields = self.qwen_parser.process(ocr_dict)
             
             # Clean amount if present
             if extracted_fields and extracted_fields.get('total_amount'):
@@ -338,6 +339,8 @@ class DocumentProcessor:
                 phone = re.sub(r'\D', '', str(extracted_fields['sender_mobile']))
                 extracted_fields['sender_mobile'] = phone[:11] if phone.startswith('03') else None
         else:
+            # Fallback: use raw text extraction
+            full_text = self.ocr_manager.extract_full_document(image_path)
             extracted_fields = self._fallback_extraction(full_text)
         
         print(f"\n📊 CLEAN DIGITAL RECEIPT DATA:")
@@ -345,7 +348,7 @@ class DocumentProcessor:
             if v:
                 print(f"   {k}: {v}")
         
-        return {"success": True, "document_type": "digital_receipt", "extracted_data": extracted_fields, "full_text": full_text}
+        return {"success": True, "document_type": "digital_receipt", "extracted_data": extracted_fields, "full_text": str(ocr_dict)}
     
     def _fallback_extraction(self, text: str) -> Dict:
         """Fallback extraction using regex"""
@@ -469,7 +472,9 @@ class DocumentProcessor:
             return {"success": False, "error": "No text extracted"}
         
         if self.qwen_parser:
-            extracted_fields = self.qwen_parser.process(full_text)
+            # Convert to dictionary format for consistency
+            ocr_dict = {"full_text": full_text}
+            extracted_fields = self.qwen_parser.process(ocr_dict)
             if extracted_fields and extracted_fields.get('total_amount'):
                 extracted_fields['total_amount'] = clean_amount_value(extracted_fields['total_amount'])
         else:
