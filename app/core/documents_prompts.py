@@ -209,18 +209,4 @@ Example 2 (Bank Transfer):
     "transaction_time": "4:14:08 PM"
 }}
 
-Example 3 (Inter Bank):
-{{
-    "bank_name": null,
-    "account_title": "AHMED & SONS",
-    "total_amount": "361000",
-    "ref_id": "FT2433900NZLOBCR",
-    "sender_name": "AHMED & SONS",
-    "sender_mobile": null,
-    "receiver_name": "UBAID UR REHMAN",
-    "receiver_mobile": null,
-    "transaction_date": "04-Dec-2024",
-    "transaction_time": "03:30:18 PM"
-}}
-
 Do not add any extra text, explanations, or markdown formatting. Return ONLY the JSON."""

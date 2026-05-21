@@ -17,16 +17,6 @@ from app.core.documents_constants import DocumentType
 from app.core.documents_model_loader import DocumentModelLoader
 from app.ocr.document_ocr import DocumentOCR
 
-# Conditional import for Qwen parser
-try:
-    from app.parser.qwen_document_parser import QwenDocumentParser
-    QWEN_AVAILABLE = True
-    print("✅ QwenDocumentParser module found")
-except ImportError as e:
-    QWEN_AVAILABLE = False
-    print(f"⚠️ QwenDocumentParser not available: {e}")
-    print("   Will use fallback extraction.")
-
 
 def clean_amount_value(amount):
     """Clean amount string to numeric format for database"""
@@ -47,7 +37,7 @@ def clean_ocr_text(text):
     # Remove common garbage characters
     text = re.sub(r'[σ┐â┼áΓÿàαÆÄèââÅ»½♥♠♦♣•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼]', '', text)
     
-    # Remove labels with colons (e.g., "Titleof AccountCard Holder Name:")
+    # Remove labels with colons
     text = re.sub(r'^[A-Za-z\s]+:\s*', '', text)
     text = re.sub(r'^[A-Za-z\s]+#\s*', '', text)
     
@@ -107,16 +97,13 @@ class DocumentProcessor:
         print("  │  ✅ OCR ready")
         
         print("  └─ Loading Qwen parser...")
-        if QWEN_AVAILABLE:
-            try:
-                from app.dependencies import model, tokenizer
-                self.qwen_parser = QwenDocumentParser(model, tokenizer)
-                print("     ✅ Qwen parser loaded (reusing existing model)")
-            except Exception as e:
-                print(f"     ⚠️ Error loading Qwen parser: {e}")
-                self.qwen_parser = None
-        else:
-            print("     ⚠️ Qwen parser disabled (module not found)")
+        try:
+            from app.dependencies import model, tokenizer
+            from app.parser.qwen_document_parser import QwenDocumentParser
+            self.qwen_parser = QwenDocumentParser(model, tokenizer)
+            print("     ✅ Document Qwen parser loaded (reusing existing model)")
+        except Exception as e:
+            print(f"     ⚠️ Error loading Qwen document parser: {e}")
             self.qwen_parser = None
         
         print("\n" + "="*60)
@@ -198,7 +185,6 @@ class DocumentProcessor:
         
         extracted_data = {}
         
-        # Save crops if requested
         if save_crops:
             os.makedirs(DocumentsConfig.CROPPED_FOLDER, exist_ok=True)
         
@@ -206,7 +192,6 @@ class DocumentProcessor:
             field_name = det['class']
             cropped = self.crop_field(image, det['bbox'])
             
-            # Save cropped image if requested
             if save_crops:
                 session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                 crop_filename = f"{session_id}_{field_name}.jpg"
@@ -276,34 +261,27 @@ class DocumentProcessor:
                 
             key_lower = key.lower()
             
-            # bank_logo -> bank_name
             if key_lower in ["logo", "bank_logo"]:
                 cleaned = clean_ocr_text(value)
                 output["bank_name"] = cleaned[:30] if cleaned else None
             
-            # account_title
             elif key_lower == "account_title":
                 cleaned = value
-                # Remove labels
                 cleaned = re.sub(r'(?i)^(titleof|account title|accounttitle|card holder name)[:\s]*', '', cleaned)
                 cleaned = re.sub(r'[^A-Za-z\s]', '', cleaned)
                 cleaned = ' '.join(cleaned.split())
-                # Take first 3 words max
                 name_parts = cleaned.split()
                 if len(name_parts) >= 2:
                     cleaned = ' '.join(name_parts[:3])
                 output["account_title"] = cleaned[:50] if cleaned and len(cleaned) > 2 else None
             
-            # account_number
             elif key_lower == "account_number":
                 digits = re.sub(r'\D', '', value)
                 output["account_number"] = digits[:20] if digits else None
             
-            # amount
             elif key_lower == "amount":
                 output["amount"] = clean_amount_value(value)
             
-            # depositor_name
             elif key_lower == "depositor_name":
                 cleaned = value
                 cleaned = re.sub(r'(?i)^(depositor name|depositorname|depositor)[:\s]*', '', cleaned)
@@ -311,7 +289,6 @@ class DocumentProcessor:
                 cleaned = ' '.join(cleaned.split())
                 output["depositor_name"] = cleaned[:50] if cleaned and len(cleaned) > 2 else None
             
-            # contact_number
             elif key_lower == "contact_number":
                 digits = re.sub(r'\D', '', value)
                 if len(digits) >= 10:
@@ -328,7 +305,6 @@ class DocumentProcessor:
                 else:
                     output["contact_number"] = None
             
-            # cnic
             elif key_lower == "cnic":
                 digits = re.sub(r'\D', '', value)
                 if len(digits) == 13:
@@ -352,7 +328,10 @@ class DocumentProcessor:
             return {"success": False, "error": "No text extracted"}
         
         if self.qwen_parser:
+            # Call the document parser directly with raw text
             extracted_fields = self.qwen_parser.process(full_text)
+            
+            # Clean amount if present
             if extracted_fields and extracted_fields.get('total_amount'):
                 extracted_fields['total_amount'] = clean_amount_value(extracted_fields['total_amount'])
             if extracted_fields and extracted_fields.get('sender_mobile'):
