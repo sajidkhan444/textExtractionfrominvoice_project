@@ -1,4 +1,4 @@
-# app/ocr/document_ocr.py - Modified to return dictionary format
+# app/ocr/document_ocr.py
 
 import cv2
 import re
@@ -6,14 +6,14 @@ import numpy as np
 from typing import Tuple, Dict
 
 class DocumentOCR:
-    """OCR handler for document processing - returns dictionary format like EasyOCR"""
+    """OCR handler for document processing"""
     
     def __init__(self):
         self.ocr = None
         self._load_ocr()
     
     def _load_ocr(self):
-        """Load PaddleOCR"""
+        """Load PaddleOCR - without unsupported parameters"""
         try:
             import os
             from paddleocr import PaddleOCR
@@ -21,13 +21,13 @@ class DocumentOCR:
             print("📌 Loading PaddleOCR for documents...")
             os.environ["FLAGS_allocator_strategy"] = "auto_growth"
             
+            # Remove unsupported parameters
             self.ocr = PaddleOCR(
                 lang='en',
                 use_doc_orientation_classify=False,
                 use_doc_unwarping=False,
                 use_textline_orientation=True,
-                device="cpu",
-                show_log=False
+                device="cpu"
             )
             print("✅ PaddleOCR ready")
         except Exception as e:
@@ -51,7 +51,7 @@ class DocumentOCR:
                     if len(line) >= 2:
                         texts.append(line[1][0])
                 
-                # Convert to dictionary with line_XX format (same as EasyOCR)
+                # Convert to dictionary with line_XX format
                 ocr_dict = {}
                 for idx, text in enumerate(texts, start=1):
                     ocr_dict[f"line_{idx:02d}"] = text
@@ -64,7 +64,6 @@ class DocumentOCR:
             print(f"OCR Error: {e}")
             return {}
     
-    # Keep old method for backward compatibility
     def extract_full_document(self, image_path: str) -> str:
         """Extract all text as raw string (for fallback)"""
         if self.ocr is None:
