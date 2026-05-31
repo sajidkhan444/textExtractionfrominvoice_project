@@ -173,6 +173,11 @@ class DocumentProcessor:
     
     def process_pipeline_a(self, image_path: str, document_type: str, save_crops: bool = False) -> Dict:
         """Pipeline A: Detection + Crop + OCR for cheques and deposit slips"""
+        # GUARD: Prevent PDFs in Pipeline A
+        if image_path.lower().endswith('.pdf'):
+            print(f"❌ ERROR: PDF file passed to Pipeline A: {image_path}")
+            return {"success": False, "error": "PDF files cannot be processed in Pipeline A. Convert to images first."}
+        
         image, detections = self.detect_fields(image_path, document_type)
         
         if len(detections) == 0:
@@ -317,6 +322,11 @@ class DocumentProcessor:
     
     def process_pipeline_b(self, image_path: str, save_crops: bool = False) -> Dict:
         """Pipeline B: Full OCR + Fallback extraction for digital receipts (Qwen disabled)"""
+        # GUARD: Prevent PDFs in Pipeline B
+        if image_path.lower().endswith('.pdf'):
+            print(f"❌ ERROR: PDF file passed to Pipeline B: {image_path}")
+            return {"success": False, "error": "PDF files cannot be processed in Pipeline B. Convert to images first."}
+        
         # Get OCR as dictionary
         ocr_dict = self.ocr_manager.extract_full_document_as_dict(image_path)
         
@@ -423,6 +433,20 @@ class DocumentProcessor:
     
     def process_document(self, file_path: str, save_crops: bool = False) -> Dict:
         """Main entry point - process any document"""
+        # GUARD 1: Prevent PDF files from being processed directly
+        if file_path.lower().endswith('.pdf'):
+            print(f"\n❌ ERROR: PDF file passed directly to process_document: {file_path}")
+            print("   PDF files must be converted to images first via document_file_router")
+            return {
+                "success": False, 
+                "error": "PDF files cannot be processed directly. Please use the document upload endpoint which handles PDF conversion automatically."
+            }
+        
+        # GUARD 2: Check if file exists
+        if not os.path.exists(file_path):
+            print(f"\n❌ ERROR: File not found: {file_path}")
+            return {"success": False, "error": f"File not found: {file_path}"}
+        
         doc_type, confidence = self.classify_document(file_path)
         
         print(f"\n{'='*60}")
@@ -460,6 +484,11 @@ class DocumentProcessor:
     def process_pipeline_a_with_details(self, image_path: str, document_type: str, save_crops: bool = False) -> Dict:
         """Pipeline A with detailed debugging information."""
         import time
+        
+        # GUARD: Prevent PDFs
+        if image_path.lower().endswith('.pdf'):
+            print(f"❌ ERROR: PDF file passed to Pipeline A details: {image_path}")
+            return {"success": False, "error": "PDF files cannot be processed in Pipeline A."}
         
         image, detections = self.detect_fields(image_path, document_type)
         
@@ -518,6 +547,11 @@ class DocumentProcessor:
     
     def process_pipeline_b_with_details(self, image_path: str, return_ocr_text: bool = False) -> Dict:
         """Pipeline B with detailed debugging information."""
+        # GUARD: Prevent PDFs
+        if image_path.lower().endswith('.pdf'):
+            print(f"❌ ERROR: PDF file passed to Pipeline B details: {image_path}")
+            return {"success": False, "error": "PDF files cannot be processed in Pipeline B."}
+        
         full_text = self.ocr_manager.extract_full_document(image_path)
         
         if not full_text:

@@ -1,4 +1,4 @@
-# app/ocr/document_ocr.py - Fixed dictionary format
+# app/ocr/document_ocr.py - Add PDF guard
 
 import cv2
 import re
@@ -34,8 +34,18 @@ class DocumentOCR:
             print(f"⚠️ Failed to load PaddleOCR: {e}")
             self.ocr = None
     
+    def _is_pdf(self, file_path: str) -> bool:
+        """Check if file path is a PDF"""
+        return file_path.lower().endswith('.pdf')
+    
     def extract_full_document_as_dict(self, image_path: str) -> Dict:
         """Extract all text and return as dictionary with line_XX format"""
+        # Guard: Do not process PDFs directly
+        if self._is_pdf(image_path):
+            print(f"❌ ERROR: PDF file passed to extract_full_document_as_dict: {image_path}")
+            print("   PDF files must be converted to images first!")
+            return {}
+        
         if self.ocr is None:
             return {}
         
@@ -60,6 +70,12 @@ class DocumentOCR:
     
     def extract_full_document(self, image_path: str) -> str:
         """Extract all text as raw string"""
+        # Guard: Do not process PDFs directly
+        if self._is_pdf(image_path):
+            print(f"❌ ERROR: PDF file passed to extract_full_document: {image_path}")
+            print("   PDF files must be converted to images first!")
+            return ""
+        
         if self.ocr is None:
             return ""
         
