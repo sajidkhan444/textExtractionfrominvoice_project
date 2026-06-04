@@ -7,23 +7,23 @@ from app.db.document_repository import (
     get_next_cheque_name, get_next_deposit_name, get_next_receipt_name,
     create_slip_placeholder, create_deposit_placeholder, create_receipt_placeholder,
     update_slip_document, update_deposit_document, update_receipt_document,
-    update_document_status,
-    insert_cheque_document, insert_deposit_slip_document, insert_digital_receipt_document
+    update_document_status
 )
 from app.db.document_storage_repository import save_processed_image
 from app.services.document_pdf_service import pdf_to_document_images_continue
 
 
-def process_single_document_page(image_path, image_name, document_processor, save_crops=False, 
-                                  doc_name=None, rack_no=None, voucher_number=None):
+def process_single_document_page(image_path, image_name, document_processor, save_crops=False):
     """
-    Process a single document image page.
+    Process a single document image page - EXTRACTION ONLY, NO DATABASE INSERT.
+    Returns extracted data and generated permanent filename.
+    The caller (API route) is responsible for updating the placeholder.
     """
     print(f"\n{'='*50}")
     print(f"📄 Processing: {image_name}")
     print(f"{'='*50}")
     
-    # Process the document
+    # Process the document (extraction only - NO INSERT)
     result = document_processor.process_document(image_path, save_crops=save_crops)
     
     if not result.get('success'):
@@ -43,12 +43,13 @@ def process_single_document_page(image_path, image_name, document_processor, sav
     # Generate permanent image name based on document type
     if document_type == 'bank_cheque':
         permanent_name = get_next_cheque_name()
+        print(f"📸 Will be saved as cheque: {permanent_name}")
     elif document_type in ['bank_deposit_slip', 'bank_deposit_slips']:
         permanent_name = get_next_deposit_name()
+        print(f"📸 Will be saved as deposit: {permanent_name}")
     else:
         permanent_name = get_next_receipt_name()
-    
-    print(f"📸 Assigned permanent name: {permanent_name}")
+        print(f"📸 Will be saved as receipt: {permanent_name}")
     
     # Save the processed image with permanent name
     save_result = save_processed_image(image_path, permanent_name)
@@ -60,75 +61,29 @@ def process_single_document_page(image_path, image_name, document_processor, sav
         image_filename = save_result['filename']
         print(f"   ✅ Image saved as: {image_filename}")
     
-    # Insert into appropriate table based on document type
-    insert_result = None
-    
-    if document_type == 'bank_cheque':
-        insert_result = insert_cheque_document(
-            bank_cheque_name=extracted_data.get('bank_name'),
-            account_holder_name=extracted_data.get('pay'),
-            cheque_number=extracted_data.get('check_number'),
-            iban=extracted_data.get('iban'),
-            cheque_amount=extracted_data.get('amount'),
-            cheque_image_filename=image_filename
-        )
-    elif document_type in ['bank_deposit_slip', 'bank_deposit_slips']:
-        insert_result = insert_deposit_slip_document(
-            bank_deposit_name=extracted_data.get('bank_name'),
-            account_title=extracted_data.get('account_title'),
-            account_number=extracted_data.get('account_number'),
-            depositor_name=extracted_data.get('depositor_name'),
-            contact_number=extracted_data.get('contact_number'),
-            cnic=extracted_data.get('cnic'),
-            deposit_amount=extracted_data.get('amount'),
-            deposit_image_filename=image_filename,
-            serial_number=None
-        )
-    else:  # digital_receipt
-        insert_result = insert_digital_receipt_document(
-            bank_digital_name=extracted_data.get('bank_name'),
-            digital_amount=extracted_data.get('total_amount'),
-            sender_name=extracted_data.get('sender_name'),
-            receiver_name=extracted_data.get('receiver_name'),
-            reference_id=extracted_data.get('ref_id'),
-            phone_number=extracted_data.get('sender_mobile'),
-            payment_date=extracted_data.get('transaction_date'),
-            payment_time=extracted_data.get('transaction_time'),
-            digital_image_filename=image_filename
-        )
-    
-    if not insert_result['success']:
-        return {
-            'success': False, 
-            'error': f'Database insert failed: {insert_result["error"]}', 
-            'image_name': image_name
-        }
-    
-    print(f"\n✅ SUCCESS! Saved as {permanent_name} (ID: {insert_result['id']})")
-    
+    # Return extraction results ONLY - NO DATABASE INSERT HERE
     return {
         'success': True,
-        'document_id': insert_result['id'],
-        'image_name': permanent_name,
         'document_type': document_type,
-        'extracted_data': extracted_data
+        'extracted_data': extracted_data,
+        'image_name': image_filename,
+        'full_text': full_text,
+        'permanent_name': permanent_name
     }
 
 
 def process_document_file(file_path, filename, document_processor, save_crops=False):
     """
     Main entry point - handles both single images and PDFs for documents.
+    RETURNS EXTRACTION RESULTS ONLY, NO DATABASE OPERATIONS.
     """
     file_ext = Path(filename).suffix.lower()
 
-    # DEBUG: Print everything
     print(f"\n{'='*60}")
     print(f"🔍 [DEBUG] process_document_file called")
     print(f"   file_path: {file_path}")
     print(f"   filename: {filename}")
     print(f"   file_ext: {file_ext}")
-    print(f"   file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']: {file_ext in ['.jpg', '.jpeg', '.png', '.bmp', '.tiff']}")
-    print(f"   file_ext == '.pdf': {file_ext == '.pdf'}")
     print(f"{'='*60}")
     
     # CASE 1: Single Image File
@@ -206,7 +161,6 @@ def process_document_file(file_path, filename, document_processor, save_crops=Fa
             if result['success']:
                 successful_count += 1
                 print(f"\n   ✅ Page {idx} processed successfully!")
-                print(f"      Document ID: {result['document_id']}")
                 print(f"      Type: {result['document_type']}")
                 print(f"      Saved as: {result['image_name']}")
             else:
@@ -230,7 +184,7 @@ def process_document_file(file_path, filename, document_processor, save_crops=Fa
             print(f"\n📸 SUCCESSFULLY PROCESSED DOCUMENTS:")
             for idx, result in enumerate(results, 1):
                 if result['success']:
-                    print(f"   Page {idx}: {result['image_name']} ({result['document_type']}) - ID: {result['document_id']}")
+                    print(f"   Page {idx}: {result['image_name']} ({result['document_type']})")
         
         return {
             'type': 'pdf',

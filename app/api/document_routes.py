@@ -272,9 +272,7 @@ async def process_document_upload(
             extracted_data = r.get('extracted_data', {})
             image_filename = r.get('image_name')
             document_type = r.get('document_type')
-            
-            update_result = None
-            
+                    
             if document_type == 'bank_cheque':
                 update_result = update_slip_document(
                     slip_id=document_id,
