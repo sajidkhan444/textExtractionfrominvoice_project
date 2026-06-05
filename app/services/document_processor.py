@@ -1,4 +1,4 @@
-# app/services/document_processor.py (COMPLETE FIXED VERSION - FALLBACK ONLY)
+# app/services/document_processor.py (COMPLETE FIXED VERSION)
 
 import os
 import cv2
@@ -476,6 +476,148 @@ class DocumentProcessor:
             print(f"   ✅ Document is a DIGITAL RECEIPT")
             print(f"   🔄 Routing to: PIPELINE B (Full OCR + Fallback Extraction)")
             return self.process_pipeline_b(file_path, save_crops=save_crops)
+    
+    # ============================================
+    # NEW METHOD: Process PDF Page with Unique ID
+    # ============================================
+    
+    def process_pdf_page_with_id(self, image_path: str, page_num: int, current_max_id: int) -> Dict:
+        """
+        Process a single PDF page with a specific sequential ID.
+        
+        This method ensures each page gets a unique ID and filename.
+        IMPORTANT: Call this method for EACH page with an updated current_max_id.
+        
+        Args:
+            image_path: Path to the page image
+            page_num: Page number (for logging)
+            current_max_id: Current MAX(id) from database BEFORE this page
+            
+        Returns:
+            Dict with processing results including unique ID and filename
+        """
+        # Generate unique ID for this specific page
+        new_id = current_max_id + 1
+        cheque_filename = f"cheque_{new_id}.jpg"
+        
+        print(f"\n{'='*50}")
+        print(f"📄 PROCESSING PDF PAGE {page_num}")
+        print(f"{'='*50}")
+        print(f"   Current MAX ID in DB: {current_max_id}")
+        print(f"   → New ID for this page: {new_id}")
+        print(f"   → Will be saved as: {cheque_filename}")
+        
+        # Check if file exists
+        if not os.path.exists(image_path):
+            return {
+                "success": False,
+                "error": f"Image not found: {image_path}",
+                "page_num": page_num
+            }
+        
+        # Classify the document
+        doc_type, confidence = self.classify_document(image_path)
+        
+        if doc_type == "unknown" or confidence < 0.5:
+            return {
+                "success": False,
+                "error": f"Could not classify document: {doc_type}",
+                "page_num": page_num
+            }
+        
+        # Process based on document type
+        if doc_type == "bank_cheque":
+            print(f"   ✅ Document is a BANK CHEQUE")
+            print(f"   🔄 Processing with Pipeline A...")
+            result = self.process_pipeline_a(image_path, "bank_cheque", save_crops=False)
+            
+            # Add the unique ID and filename to the result
+            if result.get("success"):
+                result["unique_id"] = new_id
+                result["cheque_filename"] = cheque_filename
+                result["page_num"] = page_num
+                
+                # Update the extracted data with the filename info
+                if "extracted_data" in result:
+                    result["extracted_data"]["_meta"] = {
+                        "slip_id": new_id,
+                        "cheque_image": cheque_filename,
+                        "page_number": page_num
+                    }
+        
+        elif doc_type == "bank_deposit_slips":
+            print(f"   ✅ Document is a DEPOSIT SLIP")
+            print(f"   🔄 Processing with Pipeline A...")
+            result = self.process_pipeline_a(image_path, "bank_deposit_slip", save_crops=False)
+            
+            if result.get("success"):
+                result["unique_id"] = new_id
+                result["cheque_filename"] = cheque_filename
+                result["page_num"] = page_num
+                result["extracted_data"]["_meta"] = {
+                    "slip_id": new_id,
+                    "cheque_image": cheque_filename,
+                    "page_number": page_num
+                }
+        
+        else:
+            print(f"   ✅ Document is a DIGITAL RECEIPT")
+            print(f"   🔄 Processing with Pipeline B...")
+            result = self.process_pipeline_b(image_path, save_crops=False)
+            
+            if result.get("success"):
+                result["unique_id"] = new_id
+                result["cheque_filename"] = cheque_filename
+                result["page_num"] = page_num
+        
+        return result
+    
+    def process_multiple_pages(self, page_images: List[str], db_callback=None) -> List[Dict]:
+        """
+        Process multiple PDF pages ensuring unique sequential IDs for each.
+        
+        This is the MAIN METHOD to use when processing PDF files with multiple pages.
+        It guarantees each page gets a unique ID and filename.
+        
+        Args:
+            page_images: List of paths to page images
+            db_callback: Optional callback function to get current MAX(id) from database.
+                        If not provided, returns results with generated IDs.
+                        
+        Returns:
+            List of processing results for each page with unique IDs
+        """
+        results = []
+        
+        # Track the last used ID to ensure sequential numbering
+        last_max_id = None
+        
+        for page_num, image_path in enumerate(page_images, 1):
+            # Get current MAX ID from database (using callback if provided)
+            if db_callback:
+                current_max_id = db_callback()
+            else:
+                # If no callback, use the last result's ID as base
+                if last_max_id is None:
+                    # Default to 0 if no previous results
+                    current_max_id = 0
+                else:
+                    current_max_id = last_max_id
+            
+            # Process this page with the current max ID
+            result = self.process_pdf_page_with_id(
+                image_path=image_path,
+                page_num=page_num,
+                current_max_id=current_max_id
+            )
+            
+            # Update last_max_id to the ID we just used
+            if result.get("success"):
+                last_max_id = result.get("unique_id", current_max_id)
+            
+            results.append(result)
+        
+        return results
     
     # ============================================
     # DETAILED METHODS FOR TESTING API

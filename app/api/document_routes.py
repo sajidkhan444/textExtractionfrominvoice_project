@@ -15,11 +15,19 @@ from app.services.document_file_router import process_document_file
 from app.services.document_processor import DocumentProcessor
 from app.services.document_pdf_service import pdf_to_document_images_continue
 from app.db.document_repository import (
-    get_last_document_id, get_all_documents, 
-    get_document_by_id, count_documents, search_documents,
-    create_slip_placeholder, create_deposit_placeholder, create_receipt_placeholder,
-    update_slip_document, update_deposit_document, update_receipt_document,
-    update_document_status
+    get_last_document_id, 
+    get_all_documents, 
+    get_document_by_id, 
+    count_documents, 
+    search_documents,
+    create_slip_placeholder, 
+    create_deposit_placeholder, 
+    create_receipt_placeholder,
+    update_slip_document, 
+    update_deposit_document, 
+    update_receipt_document,
+    update_document_status, 
+    get_current_max_id
 )
 from app.config import DOCUMENT_STORAGE_PATH
 from app.core.documents_config import DocumentsConfig
@@ -128,7 +136,33 @@ async def upload_receipt_document(
 
 
 # ============================================
-# COMMON PROCESSING FUNCTION
+# HELPER FUNCTION: Get unique filename for PDF page
+# ============================================
+
+def get_unique_filename_for_page(document_type: str, page_num: int, current_max_id: int) -> tuple:
+    """
+    Generate unique sequential filename for a PDF page.
+    
+    Args:
+        document_type: Type of document (bank_cheque, bank_deposit_slips, digital_bank_receipt)
+        page_num: Page number (for logging only)
+        current_max_id: Current MAX ID from database BEFORE this page
+    
+    Returns:
+        Tuple of (filename, new_id)
+    """
+    new_id = current_max_id + 1
+    
+    if document_type == "bank_cheque":
+        return f"cheque_{new_id}.jpg", new_id
+    elif document_type == "bank_deposit_slips":
+        return f"deposit_{new_id}.jpg", new_id
+    else:
+        return f"receipt_{new_id}.jpg", new_id
+
+
+# ============================================
+# COMMON PROCESSING FUNCTION (FIXED WITH IMAGE SAVING)
 # ============================================
 
 async def process_document_upload(
@@ -140,6 +174,8 @@ async def process_document_upload(
 ):
     """
     Common function to process document uploads for all three APIs.
+    
+    FIXED: Each PDF page now gets a UNIQUE sequential filename AND the image is saved.
     """
     print(f"\n{'='*70}")
     print(f"🔍 [API] Document Upload Started")
@@ -150,12 +186,14 @@ async def process_document_upload(
     print(f"   Expected Type: {expected_doc_type}")
     print(f"{'='*70}")
     
-    # Create temp folders for crops (if needed for debugging)
+    # Create temp folders for crops
     session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     crop_session_folder = os.path.join(DocumentsConfig.CROPPED_FOLDER, session_id)
     os.makedirs(crop_session_folder, exist_ok=True)
     original_cropped_folder = DocumentsConfig.CROPPED_FOLDER
-    # Keep crops for debugging but not returned to frontend
+    
+    tmp_path = None
+    temp_images_for_pdf = None  # Store temp images for PDF processing
     
     try:
         # Validate file extension
@@ -185,10 +223,10 @@ async def process_document_upload(
         
         if file_ext == '.pdf':
             print(f"\n📄 PDF detected - converting first page for classification...")
-            temp_images = pdf_to_document_images_continue(tmp_path, start_from=1)
-            if not temp_images:
+            temp_images_for_pdf = pdf_to_document_images_continue(tmp_path, start_from=1)
+            if not temp_images_for_pdf:
                 raise HTTPException(status_code=500, detail="Failed to convert PDF first page")
-            classification_path = temp_images[0]
+            classification_path = temp_images_for_pdf[0]
             print(f"   Using converted image for classification: {classification_path}")
         else:
             classification_path = tmp_path
@@ -229,33 +267,10 @@ async def process_document_upload(
             except:
                 pass
         
-        # Step 2: Create placeholder based on document type
-        placeholder_result = None
-        table_name = None
-        document_id = None
-        
-        if is_cheque:
-            placeholder_result = create_slip_placeholder(doc_name, rack_no, voucher_number, file.filename)
-            table_name = "slip"
-            print(f"   Created placeholder in SLIP table")
-        elif is_deposit:
-            placeholder_result = create_deposit_placeholder(doc_name, rack_no, voucher_number, file.filename)
-            table_name = "deposit"
-            print(f"   Created placeholder in DEPOSIT table")
-        else:
-            placeholder_result = create_receipt_placeholder(doc_name, rack_no, voucher_number, file.filename)
-            table_name = "receipt"
-            print(f"   Created placeholder in RECEIPT table")
-        
-        if not placeholder_result['success']:
-            raise HTTPException(status_code=500, detail=f"Failed to create placeholder: {placeholder_result['error']}")
-        
-        document_id = placeholder_result['id']
-        print(f"✅ Placeholder ID: {document_id} (status: processing)")
-        
-        # Step 3: Process the document
+        # Step 2: Process the document (extraction only - no image saving)
         print(f"\n🔄 Processing document...")
-        result = process_document_file(tmp_path, file.filename, processor)
+        # IMPORTANT: Pass save_images=False to prevent premature saving
+        result = process_document_file(tmp_path, file.filename, processor, save_images=False)
         
         print(f"\n📊 Processing Result:")
         print(f"   Type: {result['type']}")
@@ -266,13 +281,64 @@ async def process_document_upload(
             print(f"   Successful: {result.get('successful', 0)}")
             print(f"   Failed: {result.get('failed', 0)}")
         
-        # Step 4: Update placeholder with extraction results
+        # Output directory for permanent storage
+        output_dir = "C:\\Users\\Dell\\textExtractionfrominvoice_project\\data\\output\\documents"
+        os.makedirs(output_dir, exist_ok=True)
+        
+        # Step 3: Handle based on type
         if result['type'] == 'image' and result['results'][0]['success']:
+            # SINGLE IMAGE - Create placeholder and update
             r = result['results'][0]
             extracted_data = r.get('extracted_data', {})
-            image_filename = r.get('image_name')
+            suggested_filename = r.get('suggested_name', r.get('image_name'))
             document_type = r.get('document_type')
-                    
+            
+            # Get the temp image path
+            temp_image_path = r.get('temp_image_path', tmp_path)
+            
+            # Get current max ID for single image
+            current_max_result = get_current_max_id()
+            if current_max_result['success']:
+                current_max_id = current_max_result['max_id']
+                new_id = current_max_id + 1
+            else:
+                new_id = 1
+            
+            # Generate unique filename
+            if document_type == 'bank_cheque':
+                image_filename = f"cheque_{new_id}.jpg"
+            elif document_type in ['bank_deposit_slip', 'bank_deposit_slips']:
+                image_filename = f"deposit_{new_id}.jpg"
+            else:
+                image_filename = f"receipt_{new_id}.jpg"
+            
+            # ✅ SAVE THE IMAGE
+            output_path = os.path.join(output_dir, image_filename)
+            if os.path.exists(temp_image_path):
+                shutil.copy2(temp_image_path, output_path)
+                print(f"   ✅ Image saved permanently: {image_filename}")
+                print(f"   📁 File size: {os.path.getsize(output_path)} bytes")
+            else:
+                print(f"   ⚠️ Warning: Temp image not found at {temp_image_path}")
+            
+            # Create placeholder
+            if is_cheque:
+                placeholder_result = create_slip_placeholder(doc_name, rack_no, voucher_number, file.filename)
+                table_name = "slip"
+            elif is_deposit:
+                placeholder_result = create_deposit_placeholder(doc_name, rack_no, voucher_number, file.filename)
+                table_name = "deposit"
+            else:
+                placeholder_result = create_receipt_placeholder(doc_name, rack_no, voucher_number, file.filename)
+                table_name = "receipt"
+            
+            if not placeholder_result['success']:
+                raise HTTPException(status_code=500, detail=f"Failed to create placeholder: {placeholder_result['error']}")
+            
+            document_id = placeholder_result['id']
+            print(f"✅ Placeholder ID: {document_id} (status: processing)")
+            
+            # Update placeholder with extracted data
             if document_type == 'bank_cheque':
                 update_result = update_slip_document(
                     slip_id=document_id,
@@ -331,26 +397,262 @@ async def process_document_upload(
                     "voucher_number": voucher_number
                 }
             }
+        
         elif result['type'] == 'pdf' and result['successful'] > 0:
-            # PDF batch processing successful
+            # PDF BATCH PROCESSING - FIXED: Save images with unique filenames
+            print(f"\n📄 Processing PDF with {result['total']} pages...")
+            print(f"   ⚠️  Creating placeholders for ALL pages FIRST, then processing...")
+            
+            processed_documents = []
+            
+            # Output directory for permanent storage
+            output_dir = "C:\\Users\\Dell\\textExtractionfrominvoice_project\\data\\output\\documents"
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Get the list of temp images from the result
+            temp_images = result.get('temp_images', [])
+            if not temp_images:
+                print(f"   ⚠️ No temp images in result, converting again...")
+                temp_images = pdf_to_document_images_continue(tmp_path, start_from=1)
+            
+            # ============================================
+            # STEP 1: Create placeholders for ALL pages FIRST
+            # ============================================
+            print(f"\n{'='*60}")
+            print(f"📝 STEP 1: Creating placeholders for all {len(result['results'])} pages...")
+            print(f"{'='*60}")
+            
+            # Get current max ID from database (across ALL tables)
+            current_max_result = get_current_max_id()  
+            if current_max_result['success']:
+                current_max_id = current_max_result['max_id']
+                print(f"   📍 Current MAX ID across all tables: {current_max_id}")
+            else:
+                current_max_id = 0
+                print(f"   📍 Starting MAX ID: {current_max_id}")
+            
+            # Initialize page_placeholders list
+            page_placeholders = []
+            temp_max_id = current_max_id
+            
+            for idx, page_result in enumerate(result['results']):
+                if not page_result['success']:
+                    page_placeholders.append({
+                        "success": False,
+                        "error": page_result.get('error', 'Unknown error'),
+                        "page": idx + 1
+                    })
+                    continue
+                
+                extracted_data = page_result.get('extracted_data', {})
+                document_type = page_result.get('document_type')
+                
+                # Generate unique ID and filename for THIS page
+                new_id = temp_max_id + 1
+                
+                if document_type == 'bank_cheque':
+                    image_filename = f"cheque_{new_id}.jpg"
+                    placeholder_result = create_slip_placeholder(f"{doc_name}_page_{idx + 1}", rack_no, voucher_number, file.filename)
+                    table_name = "slip"
+                elif document_type in ['bank_deposit_slip', 'bank_deposit_slips']:
+                    image_filename = f"deposit_{new_id}.jpg"
+                    placeholder_result = create_deposit_placeholder(f"{doc_name}_page_{idx + 1}", rack_no, voucher_number, file.filename)
+                    table_name = "deposit"
+                else:
+                    image_filename = f"receipt_{new_id}.jpg"
+                    placeholder_result = create_receipt_placeholder(f"{doc_name}_page_{idx + 1}", rack_no, voucher_number, file.filename)
+                    table_name = "receipt"
+                
+                print(f"\n   📄 Page {idx + 1}:")
+                print(f"      Current MAX ID: {current_max_id}")
+                print(f"      → New ID: {new_id}")
+                print(f"      → Filename: {image_filename}")
+                
+                if not placeholder_result['success']:
+                    page_placeholders.append({
+                        "success": False,
+                        "error": f"Failed to create placeholder: {placeholder_result['error']}",
+                        "page": idx + 1
+                    })
+                    continue
+                
+                page_document_id = placeholder_result['id']
+                print(f"      ✅ Placeholder created with ID: {page_document_id}")
+                
+                # Store placeholder info for later update
+                page_placeholders.append({
+                    "success": True,
+                    "page": idx + 1,
+                    "document_id": page_document_id,
+                    "document_type": document_type,
+                    "image_filename": image_filename,
+                    "table_name": table_name,
+                    "extracted_data": extracted_data,
+                    "temp_image_path": temp_images[idx] if idx < len(temp_images) else page_result.get('temp_image_path'),
+                    "status": "processing"
+                })
+                
+                # Update temp_max_id for next page
+                temp_max_id = new_id
+            
+            print(f"\n{'='*60}")
+            created_count = len([p for p in page_placeholders if p.get('success')])
+            print(f"📊 Placeholders Created: {created_count} of {len(page_placeholders)} pages (Status: processing)")
+            if created_count == 0:
+                return {
+                    "success": False,
+                    "message": "Failed to create any placeholders",
+                    "error": "No placeholders were created"
+                }
+            print(f"{'='*60}")
+            
+            # ============================================
+            # STEP 2: Process each page and update status to 'approved'
+            # ============================================
+            print(f"\n{'='*60}")
+            print(f"🔄 STEP 2: Processing each page and updating status...")
+            print(f"{'='*60}")
+            
+            successful_count = 0
+            failed_count = 0
+            
+            for placeholder in page_placeholders:
+                if not placeholder.get('success'):
+                    processed_documents.append({
+                        "success": False,
+                        "error": placeholder.get('error', 'Unknown error'),
+                        "page": placeholder.get('page', 0),
+                        "status": "failed"
+                    })
+                    failed_count += 1
+                    continue
+                
+                page_num = placeholder['page']
+                page_document_id = placeholder['document_id']
+                document_type = placeholder['document_type']
+                image_filename = placeholder['image_filename']
+                table_name = placeholder['table_name']
+                extracted_data = placeholder['extracted_data']
+                temp_image_path = placeholder.get('temp_image_path')
+                
+                print(f"\n   📄 Processing Page {page_num} (ID: {page_document_id})...")
+                print(f"      Current Status: processing → (updating to approved)")
+                
+                # Save the actual image file
+                if temp_image_path and os.path.exists(temp_image_path):
+                    output_path = os.path.join(output_dir, image_filename)
+                    
+                    # Check if file already exists
+                    if os.path.exists(output_path):
+                        print(f"      ⚠️ File already exists: {image_filename}, overwriting...")
+                        os.remove(output_path)
+                    
+                    # Copy the file from temp to permanent location
+                    shutil.copy2(temp_image_path, output_path)
+                    
+                    # Verify the file was saved
+                    if os.path.exists(output_path):
+                        file_size = os.path.getsize(output_path)
+                        print(f"      ✅ Image saved: {image_filename} ({file_size} bytes)")
+                    else:
+                        print(f"      ❌ Failed to save image: {image_filename}")
+                else:
+                    print(f"      ❌ ERROR: Temp image not found at {temp_image_path}")
+                    # Try to find the temp image in alternate locations
+                    alt_path = placeholder.get('image_path')
+                    if alt_path and os.path.exists(alt_path):
+                        output_path = os.path.join(output_dir, image_filename)
+                        shutil.copy2(alt_path, output_path)
+                        print(f"      ✅ Image saved from alt path: {image_filename}")
+                    else:
+                        print(f"      ❌ No valid temp image found for page {page_num}")
+                
+                # Update the placeholder with extracted data and change status to 'approved'
+                if document_type == 'bank_cheque':
+                    update_result = update_slip_document(
+                        slip_id=page_document_id,
+                        bank_cheque_name=extracted_data.get('bank_name'),
+                        account_holder_name=extracted_data.get('pay'),
+                        cheque_number=extracted_data.get('check_number'),
+                        iban=extracted_data.get('iban'),
+                        cheque_amount=extracted_data.get('amount'),
+                        cheque_image_filename=image_filename
+                    )
+                elif document_type in ['bank_deposit_slip', 'bank_deposit_slips']:
+                    update_result = update_deposit_document(
+                        deposit_id=page_document_id,
+                        bank_deposit_name=extracted_data.get('bank_name'),
+                        account_title=extracted_data.get('account_title'),
+                        account_number=extracted_data.get('account_number'),
+                        depositor_name=extracted_data.get('depositor_name'),
+                        contact_number=extracted_data.get('contact_number'),
+                        cnic=extracted_data.get('cnic'),
+                        deposit_amount=extracted_data.get('amount'),
+                        deposit_image_filename=image_filename
+                    )
+                else:
+                    update_result = update_receipt_document(
+                        receipt_id=page_document_id,
+                        bank_digital_name=extracted_data.get('bank_name'),
+                        digital_amount=extracted_data.get('total_amount'),
+                        sender_name=extracted_data.get('sender_name'),
+                        receiver_name=extracted_data.get('receiver_name'),
+                        reference_id=extracted_data.get('ref_id'),
+                        phone_number=extracted_data.get('sender_mobile'),
+                        payment_date=extracted_data.get('transaction_date'),
+                        payment_time=extracted_data.get('transaction_time'),
+                        digital_image_filename=image_filename
+                    )
+                
+                if update_result['success']:
+                    processed_documents.append({
+                        "success": True,
+                        "document_id": page_document_id,
+                        "image_name": image_filename,
+                        "document_type": document_type,
+                        "extracted_data": extracted_data,
+                        "page": page_num,
+                        "status": "approved"
+                    })
+                    print(f"      ✅ Updated successfully with image: {image_filename}")
+                    successful_count += 1
+                else:
+                    update_document_status(page_document_id, table_name, 'failed')
+                    processed_documents.append({
+                        "success": False,
+                        "error": update_result.get('error', 'Update failed'),
+                        "document_id": page_document_id,
+                        "page": page_num,
+                        "status": "failed"
+                    })
+                    print(f"      ❌ Update failed for page {page_num}")
+                    failed_count += 1
+            
+            # Return final response
+            print(f"\n{'='*60}")
+            print(f"📊 FINAL SUMMARY")
+            print(f"{'='*60}")
+            print(f"   Total Pages: {len(page_placeholders)}")
+            print(f"   ✅ Successful: {successful_count}")
+            print(f"   ❌ Failed: {failed_count}")
+            print(f"{'='*60}")
+            
             return {
                 "success": True,
-                "message": f"Processed {result['total']} pages, {result['successful']} successful",
-                "total_pages": result['total'],
-                "successful_pages": result['successful'],
-                "failed_pages": result['failed'],
-                "start_number": result.get('start_number'),
-                "end_number": result.get('end_number'),
-                "documents": result['results']
+                "message": f"Placeholders created for {len(page_placeholders)} pages. Processed {successful_count} successfully, {failed_count} failed.",
+                "total_pages": len(page_placeholders),
+                "placeholder_created": len([p for p in page_placeholders if p.get('success')]),
+                "successful_pages": successful_count,
+                "failed_pages": failed_count,
+                "documents": processed_documents
             }
+        
         else:
             # Processing failed
-            update_document_status(document_id, table_name, 'failed')
             return {
                 "success": False,
                 "message": "Document processing failed",
-                "error": result.get('error', 'Unknown error'),
-                "document_id": document_id
+                "error": result.get('error', 'Unknown error')
             }
     
     except HTTPException:
@@ -365,9 +667,17 @@ async def process_document_upload(
         # Restore original cropped folder
         DocumentsConfig.CROPPED_FOLDER = original_cropped_folder
         # Clean up temp file
-        if os.path.exists(tmp_path):
+        if tmp_path and os.path.exists(tmp_path):
             os.unlink(tmp_path)
             print(f"   Cleaned up temp file: {tmp_path}")
+        # Clean up temp images
+        if temp_images_for_pdf:
+            for img in temp_images_for_pdf:
+                if os.path.exists(img):
+                    try:
+                        os.remove(img)
+                    except:
+                        pass
         # Clean up crop session folder
         if os.path.exists(crop_session_folder):
             try:
@@ -627,7 +937,7 @@ async def test_upload_document(
         start_time = time.time()
         
         processor = DocumentProcessor()
-        result = process_document_file(tmp_path, file.filename, processor, save_crops=save_crops)
+        result = process_document_file(tmp_path, file.filename, processor, save_crops=save_crops, save_images=False)
         
         processing_time = time.time() - start_time
         

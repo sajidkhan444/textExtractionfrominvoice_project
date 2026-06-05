@@ -3,6 +3,7 @@
 import os
 import re
 from datetime import datetime
+from typing import Dict
 from app.db.postgres_client import db
 
 
@@ -52,6 +53,7 @@ def create_slip_placeholder(slip_name, rack_no, voucher_number, image_path):
             datetime.now()
         )
         
+        # execute_query already handles commit internally
         result = db.execute_query(query, params, fetch_one=True)
         
         if result:
@@ -97,6 +99,7 @@ def update_slip_document(
             slip_id
         )
         
+        # execute_query already handles commit internally
         result = db.execute_query(query, params, fetch_one=True)
         
         if result:
@@ -143,6 +146,7 @@ def insert_cheque_document(
             datetime.now()
         )
         
+        # execute_query already handles commit internally
         result = db.execute_query(query, params, fetch_one=True)
         
         if result:
@@ -199,6 +203,7 @@ def create_deposit_placeholder(deposit_name, rack_no, voucher_number, image_path
             datetime.now()
         )
         
+        # execute_query already handles commit internally
         result = db.execute_query(query, params, fetch_one=True)
         
         if result:
@@ -250,6 +255,7 @@ def update_deposit_document(
             deposit_id
         )
         
+        # execute_query already handles commit internally
         result = db.execute_query(query, params, fetch_one=True)
         
         if result:
@@ -305,6 +311,7 @@ def insert_deposit_slip_document(
             datetime.now()
         )
         
+        # execute_query already handles commit internally
         result = db.execute_query(query, params, fetch_one=True)
         
         if result:
@@ -361,6 +368,7 @@ def create_receipt_placeholder(receipt_name, rack_no, voucher_number, image_path
             datetime.now()
         )
         
+        # execute_query already handles commit internally
         result = db.execute_query(query, params, fetch_one=True)
         
         if result:
@@ -415,6 +423,7 @@ def update_receipt_document(
             receipt_id
         )
         
+        # execute_query already handles commit internally
         result = db.execute_query(query, params, fetch_one=True)
         
         if result:
@@ -470,6 +479,7 @@ def insert_digital_receipt_document(
             datetime.now()
         )
         
+        # execute_query already handles commit internally
         result = db.execute_query(query, params, fetch_one=True)
         
         if result:
@@ -503,6 +513,7 @@ def update_document_status(document_id, table_name, status):
         """
         
         params = (status, document_id)
+        # execute_query already handles commit internally
         result = db.execute_query(query, params, fetch_one=True)
         
         if result:
@@ -685,3 +696,46 @@ def count_documents():
         return {'success': True, 'count': result['total'] if result else 0}
     except Exception as e:
         return {'success': False, 'error': str(e), 'count': 0}
+
+
+# ============================================
+# FUNCTION: Get Current Max ID Across All Tables
+# ============================================
+
+def get_current_max_id() -> Dict:
+    """
+    Get the current maximum ID from slip, deposit, and receipt tables.
+    
+    This function is used for generating unique sequential IDs across all document types.
+    Each call returns the current MAX ID, which should be used before creating a new record.
+    
+    IMPORTANT: For PDF pages, call this function BEFORE each page to get a fresh ID.
+    
+    Returns:
+        Dict with 'success' and 'max_id' (or 'error')
+        Example: {"success": True, "max_id": 17}
+    """
+    try:
+        # Query to get maximum ID across all three tables
+        query = """
+            SELECT COALESCE(MAX(id), 0) as max_id FROM (
+                SELECT id FROM slip
+                UNION ALL
+                SELECT id FROM deposit
+                UNION ALL
+                SELECT id FROM receipt
+            ) as all_ids
+        """
+        
+        result = db.execute_query(query, fetch_one=True)
+        
+        if result and 'max_id' in result:
+            max_id = result['max_id']
+            print(f"   📊 Current MAX ID across all tables: {max_id}")
+            return {"success": True, "max_id": max_id}
+        else:
+            return {"success": True, "max_id": 0}
+    
+    except Exception as e:
+        print(f"⚠️ Error getting current max ID: {e}")
+        return {"success": False, "error": str(e), "max_id": 0}

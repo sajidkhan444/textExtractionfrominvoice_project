@@ -24,7 +24,7 @@ class DocumentsConfig:
     
     BANK_CHEQUE_DETECTION_MODEL_PATH = os.path.join(
         BASE_MODEL_PATH,
-        os.getenv("BANK_CHEQUE_MODEL", "bankcheckdetection-modelv1.pt")
+        os.getenv("BANK_CHEQUE_MODEL", "bankcheckdetection-modelv3.pt")
     )
     
     # Qwen model configuration
