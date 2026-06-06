@@ -30,7 +30,7 @@ def get_next_cheque_name():
 
 
 def create_slip_placeholder(slip_name, rack_no, voucher_number, image_path):
-    """Create a placeholder row in slip table with metadata."""
+    """Create a placeholder row in slip table with metadata and return the ID."""
     try:
         query = """
             INSERT INTO slip (
@@ -53,12 +53,12 @@ def create_slip_placeholder(slip_name, rack_no, voucher_number, image_path):
             datetime.now()
         )
         
-        # execute_query already handles commit internally
         result = db.execute_query(query, params, fetch_one=True)
         
         if result:
-            print(f"   ✅ Slip placeholder created! ID: {result['id']} (status: processing)")
-            return {'success': True, 'id': result['id']}
+            new_id = result['id']
+            print(f"   ✅ Slip placeholder created! ID: {new_id} (status: processing)")
+            return {'success': True, 'id': new_id}
         return {'success': False, 'error': 'No data returned'}
     except Exception as e:
         print(f"   ❌ Slip placeholder creation error: {e}")
@@ -739,3 +739,43 @@ def get_current_max_id() -> Dict:
     except Exception as e:
         print(f"⚠️ Error getting current max ID: {e}")
         return {"success": False, "error": str(e), "max_id": 0}
+    
+# # Add these functions to document_repository.py (after existing functions)
+
+# def get_last_slip_id_dict() -> Dict:
+#     """Get the last ID from slip table (bank cheques) as Dict."""
+#     try:
+#         query = "SELECT COALESCE(MAX(id), 0) as max_id FROM slip"
+#         result = db.execute_query(query, fetch_one=True)
+#         max_id = result['max_id'] if result else 0
+#         print(f"   📊 Last slip ID (bank cheque): {max_id}")
+#         return {"success": True, "max_id": max_id}
+#     except Exception as e:
+#         print(f"⚠️ Error getting last slip ID: {e}")
+#         return {"success": False, "error": str(e), "max_id": 0}
+
+
+# def get_last_deposit_id_dict() -> Dict:
+#     """Get the last ID from deposit table as Dict."""
+#     try:
+#         query = "SELECT COALESCE(MAX(id), 0) as max_id FROM deposit"
+#         result = db.execute_query(query, fetch_one=True)
+#         max_id = result['max_id'] if result else 0
+#         print(f"   📊 Last deposit ID: {max_id}")
+#         return {"success": True, "max_id": max_id}
+#     except Exception as e:
+#         print(f"⚠️ Error getting last deposit ID: {e}")
+#         return {"success": False, "error": str(e), "max_id": 0}
+
+
+# def get_last_receipt_id_dict() -> Dict:
+#     """Get the last ID from receipt table as Dict."""
+#     try:
+#         query = "SELECT COALESCE(MAX(id), 0) as max_id FROM receipt"
+#         result = db.execute_query(query, fetch_one=True)
+#         max_id = result['max_id'] if result else 0
+#         print(f"   📊 Last receipt ID: {max_id}")
+#         return {"success": True, "max_id": max_id}
+#     except Exception as e:
+#         print(f"⚠️ Error getting last receipt ID: {e}")
+#         return {"success": False, "error": str(e), "max_id": 0}

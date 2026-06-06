@@ -27,7 +27,10 @@ from app.db.document_repository import (
     update_deposit_document, 
     update_receipt_document,
     update_document_status, 
-    get_current_max_id
+    get_current_max_id,
+    # get_last_slip_id_dict,
+    # get_last_deposit_id_dict,
+    # get_last_receipt_id_dict
 )
 from app.config import DOCUMENT_STORAGE_PATH
 from app.core.documents_config import DocumentsConfig
@@ -296,23 +299,29 @@ async def process_document_upload(
             # Get the temp image path
             temp_image_path = r.get('temp_image_path', tmp_path)
             
-            # Get current max ID for single image
-            current_max_result = get_current_max_id()
-            if current_max_result['success']:
-                current_max_id = current_max_result['max_id']
-                new_id = current_max_id + 1
+            # Create placeholder FIRST to get the actual database ID
+            if is_cheque:
+                placeholder_result = create_slip_placeholder(doc_name, rack_no, voucher_number, file.filename)
+                table_name = "slip"
+                prefix = "cheque"
+            elif is_deposit:
+                placeholder_result = create_deposit_placeholder(doc_name, rack_no, voucher_number, file.filename)
+                table_name = "deposit"
+                prefix = "deposit"
             else:
-                new_id = 1
+                placeholder_result = create_receipt_placeholder(doc_name, rack_no, voucher_number, file.filename)
+                table_name = "receipt"
+                prefix = "receipt"
             
-            # Generate unique filename
-            if document_type == 'bank_cheque':
-                image_filename = f"cheque_{new_id}.jpg"
-            elif document_type in ['bank_deposit_slip', 'bank_deposit_slips']:
-                image_filename = f"deposit_{new_id}.jpg"
-            else:
-                image_filename = f"receipt_{new_id}.jpg"
+            if not placeholder_result['success']:
+                raise HTTPException(status_code=500, detail=f"Failed to create placeholder: {placeholder_result['error']}")
             
-            # ✅ SAVE THE IMAGE
+            document_id = placeholder_result['id']
+            # ✅ Use the actual database ID for filename
+            image_filename = f"{prefix}_{document_id}.jpg"
+            print(f"✅ Placeholder ID: {document_id} → Filename: {image_filename}")
+            
+            # ✅ SAVE THE IMAGE with the correct filename
             output_path = os.path.join(output_dir, image_filename)
             if os.path.exists(temp_image_path):
                 shutil.copy2(temp_image_path, output_path)
@@ -320,23 +329,6 @@ async def process_document_upload(
                 print(f"   📁 File size: {os.path.getsize(output_path)} bytes")
             else:
                 print(f"   ⚠️ Warning: Temp image not found at {temp_image_path}")
-            
-            # Create placeholder
-            if is_cheque:
-                placeholder_result = create_slip_placeholder(doc_name, rack_no, voucher_number, file.filename)
-                table_name = "slip"
-            elif is_deposit:
-                placeholder_result = create_deposit_placeholder(doc_name, rack_no, voucher_number, file.filename)
-                table_name = "deposit"
-            else:
-                placeholder_result = create_receipt_placeholder(doc_name, rack_no, voucher_number, file.filename)
-                table_name = "receipt"
-            
-            if not placeholder_result['success']:
-                raise HTTPException(status_code=500, detail=f"Failed to create placeholder: {placeholder_result['error']}")
-            
-            document_id = placeholder_result['id']
-            print(f"✅ Placeholder ID: {document_id} (status: processing)")
             
             # Update placeholder with extracted data
             if document_type == 'bank_cheque':
@@ -399,7 +391,7 @@ async def process_document_upload(
             }
         
         elif result['type'] == 'pdf' and result['successful'] > 0:
-            # PDF BATCH PROCESSING - FIXED: Save images with unique filenames
+            # PDF BATCH PROCESSING - FIXED: Create ALL placeholders FIRST, then process
             print(f"\n📄 Processing PDF with {result['total']} pages...")
             print(f"   ⚠️  Creating placeholders for ALL pages FIRST, then processing...")
             
@@ -422,18 +414,8 @@ async def process_document_upload(
             print(f"📝 STEP 1: Creating placeholders for all {len(result['results'])} pages...")
             print(f"{'='*60}")
             
-            # Get current max ID from database (across ALL tables)
-            current_max_result = get_current_max_id()  
-            if current_max_result['success']:
-                current_max_id = current_max_result['max_id']
-                print(f"   📍 Current MAX ID across all tables: {current_max_id}")
-            else:
-                current_max_id = 0
-                print(f"   📍 Starting MAX ID: {current_max_id}")
-            
             # Initialize page_placeholders list
             page_placeholders = []
-            temp_max_id = current_max_id
             
             for idx, page_result in enumerate(result['results']):
                 if not page_result['success']:
@@ -447,26 +429,19 @@ async def process_document_upload(
                 extracted_data = page_result.get('extracted_data', {})
                 document_type = page_result.get('document_type')
                 
-                # Generate unique ID and filename for THIS page
-                new_id = temp_max_id + 1
-                
+                # Determine prefix and table based on document type
                 if document_type == 'bank_cheque':
-                    image_filename = f"cheque_{new_id}.jpg"
-                    placeholder_result = create_slip_placeholder(f"{doc_name}_page_{idx + 1}", rack_no, voucher_number, file.filename)
+                    prefix = "cheque"
                     table_name = "slip"
+                    placeholder_result = create_slip_placeholder(f"{doc_name}_page_{idx + 1}", rack_no, voucher_number, file.filename)
                 elif document_type in ['bank_deposit_slip', 'bank_deposit_slips']:
-                    image_filename = f"deposit_{new_id}.jpg"
-                    placeholder_result = create_deposit_placeholder(f"{doc_name}_page_{idx + 1}", rack_no, voucher_number, file.filename)
+                    prefix = "deposit"
                     table_name = "deposit"
+                    placeholder_result = create_deposit_placeholder(f"{doc_name}_page_{idx + 1}", rack_no, voucher_number, file.filename)
                 else:
-                    image_filename = f"receipt_{new_id}.jpg"
-                    placeholder_result = create_receipt_placeholder(f"{doc_name}_page_{idx + 1}", rack_no, voucher_number, file.filename)
+                    prefix = "receipt"
                     table_name = "receipt"
-                
-                print(f"\n   📄 Page {idx + 1}:")
-                print(f"      Current MAX ID: {current_max_id}")
-                print(f"      → New ID: {new_id}")
-                print(f"      → Filename: {image_filename}")
+                    placeholder_result = create_receipt_placeholder(f"{doc_name}_page_{idx + 1}", rack_no, voucher_number, file.filename)
                 
                 if not placeholder_result['success']:
                     page_placeholders.append({
@@ -477,7 +452,14 @@ async def process_document_upload(
                     continue
                 
                 page_document_id = placeholder_result['id']
-                print(f"      ✅ Placeholder created with ID: {page_document_id}")
+                # ✅ Use the actual database ID for filename
+                image_filename = f"{prefix}_{page_document_id}.jpg"
+                
+                print(f"\n   📄 Page {idx + 1}:")
+                print(f"      Document Type: {document_type}")
+                print(f"      Database ID: {page_document_id}")
+                print(f"      → Filename: {image_filename}")
+                print(f"      ✅ Placeholder created with ID: {page_document_id}, Status: processing")
                 
                 # Store placeholder info for later update
                 page_placeholders.append({
@@ -491,9 +473,6 @@ async def process_document_upload(
                     "temp_image_path": temp_images[idx] if idx < len(temp_images) else page_result.get('temp_image_path'),
                     "status": "processing"
                 })
-                
-                # Update temp_max_id for next page
-                temp_max_id = new_id
             
             print(f"\n{'='*60}")
             created_count = len([p for p in page_placeholders if p.get('success')])
@@ -537,6 +516,7 @@ async def process_document_upload(
                 
                 print(f"\n   📄 Processing Page {page_num} (ID: {page_document_id})...")
                 print(f"      Current Status: processing → (updating to approved)")
+                print(f"      Filename: {image_filename}")
                 
                 # Save the actual image file
                 if temp_image_path and os.path.exists(temp_image_path):
